@@ -1,0 +1,1535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Controlled Christmas Tree with Gemini</title>
+    <!-- MediaPipe 依赖库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050810;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* UI 界面层 */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .hud-text {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 230, 100, 0.9);
+            text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+            font-size: 13px;
+            letter-spacing: 1px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-left: 2px solid rgba(255, 215, 0, 0.6);
+            border-radius: 0 10px 10px 0;
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+        }
+
+        .hud-text h3 {
+            margin-top: 0;
+            font-size: 16px;
+            color: #fff;
+        }
+
+        .hud-text p {
+            margin: 5px 0;
+        }
+
+        /* Gemini 魔法祝福按钮区域 */
+        #magic-ui {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            pointer-events: auto;
+            text-align: right;
+        }
+
+        #blessing-btn {
+            background: linear-gradient(135deg, #1a5e32, #0f3b1e);
+            border: 1px solid rgba(100, 255, 100, 0.6);
+            color: #aaddaa;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: 0.3s;
+            border-radius: 30px;
+            font-size: 14px;
+            box-shadow: 0 0 20px rgba(26, 94, 50, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #blessing-btn:hover {
+            transform: scale(1.05);
+            background: #2f9e4f;
+            color: #fff;
+            box-shadow: 0 0 30px rgba(47, 158, 79, 0.8);
+        }
+
+        /* 祝福语显示层 */
+        #blessing-overlay {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 600px;
+            text-align: center;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 1s ease;
+            z-index: 20;
+        }
+
+        #blessing-content {
+            font-size: 24px;
+            line-height: 1.6;
+            color: #ffd700;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.8), 0 0 20px rgba(255, 100, 50, 0.6);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            backdrop-filter: blur(5px);
+            font-family: "Georgia", serif;
+        }
+
+        #status-bar-container {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        #status-bar {
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(20, 80, 40, 0.7);
+            padding: 10px 40px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 215, 0, 0.4);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        #upload-container {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            pointer-events: auto;
+        }
+
+        #upload-btn {
+            background: linear-gradient(135deg, #b30000, #800000);
+            border: 1px solid rgba(255, 215, 0, 0.6);
+            color: #ffd700;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: 0.3s;
+            border-radius: 8px;
+            font-size: 12px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        #upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 50, 50, 0.5);
+            background: #cc0000;
+        }
+
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #050810;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #d4af37;
+            font-size: 18px;
+            transition: opacity 0.8s;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #333;
+            border-top: 2px solid #d4af37;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        #input_video {
+            display: none;
+        }
+
+        #debug-cam {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 120px;
+            height: 90px;
+            background: #000;
+            border: 1px solid #333;
+            opacity: 0.3;
+            z-index: 5;
+            transform: scaleX(-1);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>正在点亮圣诞树...<br><span style="font-size:12px; opacity:0.7">请允许摄像头权限以启用魔法手势</span></div>
+    </div>
+    <video id="input_video"></video>
+    <canvas id="debug-cam"></canvas>
+    <div id="canvas-container"></div>
+    <div id="ui-layer">
+        <div class="hud-text">
+            <h3>魔法手势指南</h3>
+            <p>✊ <b>握拳</b>: 呼唤圣诞树</p>
+            <p>✌️ <b>V字手势</b>: 变成爱心</p>
+            <p>🖐 <b>张开</b>: 释放星空(全向球体)</p>
+            <p>🤏 <b>捏合</b>: 拾取正面照片</p>
+            <p>👋 <b>移动</b>: 旋转球体视角</p>
+        </div>
+        <!-- Gemini 祝福 UI -->
+        <!-- <div id="magic-ui">
+<button id="blessing-btn" onclick="generateBlessing()">
+<span>✨ 祈愿祝福</span>
+</button>
+</div> -->
+        <div id="blessing-overlay">
+            <div id="blessing-content"></div>
+        </div>
+        <div id="status-bar-container">
+            <div id="status-bar">等待手势指令...</div>
+        </div>
+        <div id="upload-container">
+            <input type="file" id="file-input" accept="image/*" multiple style="display:none;">
+            <button id="upload-btn" onclick="document.getElementById('file-input').click()">上传照片挂饰</button>
+        </div>
+    </div>
+    <script type="importmap">
+{
+"imports": {
+"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}
+}
+</script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        // ================= 配置参数 =================
+        const CONFIG = {
+            colors: {
+                bg: 0x050810,
+                green: 0x2f9e4f,
+                gold: 0xffd700,
+                red: 0xff3333,
+                white: 0xffffff,
+                heart: 0xff3366
+            },
+            particleCount: 2000,
+            photoCount: 40,
+            treeHeight: 65,
+            treeRadius: 28,
+            // 【核心修改】将心形大小从45调整为30，确保不超过屏幕
+            heartSize: 4
+        };
+        const STATE = {
+            mode: 'TREE',
+            handDetected: false,
+            handPosition: { x: 0, y: 0 },
+            pinchDistance: 1,
+            activePhotoIndex: 0,
+            lastModeTime: 0,
+            rotVelX: 0.001,
+            rotVelY: 0,
+            // 【优化】心形模式默认距离调整为120（更近，适合较小的心形）
+            cameraRadius: 200,
+            targetCameraRadius: 200,
+            heartProgress: 0 // 心形转换进度 (0-1)
+        };
+        // ================= 1. Three.js 场景初始化 =================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(CONFIG.colors.bg);
+        scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.012);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // 初始位置
+        camera.position.set(0, 30, 200); // 与 targetCameraRadius 一致
+        camera.up.set(0, 1, 0);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.9;
+        container.appendChild(renderer.domElement);
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.3;
+        bloomPass.strength = 1.2;
+        bloomPass.radius = 0.5;
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+        // === 灯光系统 ===
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2.5);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(CONFIG.colors.gold, 8.0, 500);
+        pointLight.position.set(20, 40, 40);
+        scene.add(pointLight);
+        const frontLight = new THREE.DirectionalLight(0xffeebb, 3.5);
+        frontLight.position.set(0, 20, 100);
+        scene.add(frontLight);
+        const rimLight = new THREE.DirectionalLight(0x4455ff, 5.0);
+        rimLight.position.set(40, 50, -40);
+        scene.add(rimLight);
+        // ================= 2. 材质与几何体构建 =================
+        const matGreen = new THREE.MeshStandardMaterial({
+            color: CONFIG.colors.green,
+            roughness: 0.3, metalness: 0.2,
+            emissive: 0x0f4a22,
+            emissiveIntensity: 0.8,
+            emissiveMap: createNoiseTexture(32, 32) // 添加噪声贴图
+        });
+        const matGold = new THREE.MeshStandardMaterial({
+            color: 0xffcc00,
+            roughness: 0.1, metalness: 0.8,
+            emissive: 0xffaa00,
+            emissiveIntensity: 1.0,
+            emissiveMap: createNoiseTexture(64, 64) // 金色使用更高分辨率
+        });
+        const matRed = new THREE.MeshStandardMaterial({
+            color: CONFIG.colors.red,
+            roughness: 0.2, metalness: 0.3,
+            emissive: 0x4a0f0f,
+            emissiveIntensity: 0.8,
+            emissiveMap: createNoiseTexture(32, 32) // 添加噪声贴图
+        });
+        // 【新增】心形材质
+        const matHeart = new THREE.MeshStandardMaterial({
+            color: CONFIG.colors.heart,
+            roughness: 0.1, metalness: 0.5,
+            emissive: 0xff6699,
+            emissiveIntensity: 0.7,
+            emissiveMap: createNoiseTexture(32, 32)
+        });
+        // 在材质定义之后添加这个函数
+        function createNoiseTexture(width, height) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(width, height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // 创建噪点图案
+                const r = Math.random() * 255;
+                const g = Math.random() * 255;
+                const b = Math.random() * 255;
+                data[i] = r;     // R
+                data[i + 1] = g; // G
+                data[i + 2] = b; // B
+                data[i + 3] = 150; // A (透明度)
+            }
+            ctx.putImageData(imageData, 0, 0);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(4, 4); // 重复贴图
+            return texture;
+        }
+        // 【核心】照片材质：强制哑光 (Roughness 1.0)
+        const matPhotoBase = new THREE.MeshStandardMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            roughness: 1.0, // 哑光，不反光
+            metalness: 0.0,
+            color: 0xffffff
+        });
+        const objects = [];
+        const dummy = new THREE.Object3D();
+        const sphereGeo = new THREE.SphereGeometry(0.8, 24, 24);
+        const boxGeo = new THREE.BoxGeometry(1.4, 1.4, 1.4);
+        // 【新增】心形几何体
+        function createHeartShape(size = 1) {
+            const curve = new THREE.Curve();
+            curve.getPoint = function (t) {
+                const angle = t * Math.PI * 2;
+                const x = size * 16 * Math.pow(Math.sin(angle), 3);
+                const y = size * (13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle));
+                return new THREE.Vector3(x, y, 0);
+            };
+            const points = curve.getPoints(100);
+            const shape = new THREE.Shape(points);
+            return shape;
+        }
+        function createStar() {
+            const starShape = new THREE.Shape();
+            const points = 5;
+            const outerRadius = 3.5;
+            const innerRadius = 1.8;
+            for (let i = 0; i < points * 2; i++) {
+                const angle = (i * Math.PI) / points;
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const x = Math.cos(angle) * radius;
+                const y = Math.sin(angle) * radius;
+                if (i === 0) starShape.moveTo(x, y);
+                else starShape.lineTo(x, y);
+            }
+            starShape.closePath();
+            const extrudeSettings = { depth: 1.2, bevelEnabled: true, bevelThickness: 0.8, bevelSize: 0.5, bevelSegments: 12 };
+            const starGeometry = new THREE.ExtrudeGeometry(starShape, extrudeSettings);
+            starGeometry.rotateZ(Math.PI / 10);
+            const starMat = new THREE.MeshStandardMaterial({
+                color: 0xffd700, roughness: 0.1, metalness: 1.0, emissive: 0xffd700, emissiveIntensity: 0.9
+            });
+            const star = new THREE.Mesh(starGeometry, starMat);
+            const topY = CONFIG.treeHeight / 2 + 2.5;
+            star.userData = {
+                treePos: new THREE.Vector3(0, topY, 0),
+                scatterPos: new THREE.Vector3(0, 45, 0),
+                targetQuaternion: new THREE.Quaternion(),
+                velocity: new THREE.Vector3(),
+                phase: 0
+            };
+            star.position.set(0, topY, 0);
+            scene.add(star);
+            objects.push(star);
+            const starLight = new THREE.PointLight(0xffd700, 2.0, 40);
+            starLight.position.set(0, topY, 0);
+            scene.add(starLight);
+        }
+        createStar();
+        function createPhotoTexture(img, index, isUserUpload = false) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const borderThickness = 20;
+            let width, height;
+            if (isUserUpload && img) {
+                const maxDim = 1024;
+                let scale = 1;
+                if (img.width > maxDim || img.height > maxDim) scale = Math.min(maxDim / img.width, maxDim / img.height);
+                const imgW = img.width * scale;
+                const imgH = img.height * scale;
+                width = imgW + borderThickness * 2;
+                height = imgH + borderThickness * 2;
+                canvas.width = width; canvas.height = height;
+                const gradient = ctx.createLinearGradient(0, 0, width, height);
+                gradient.addColorStop(0, "#ffd700"); gradient.addColorStop(0.5, "#ffeb3b"); gradient.addColorStop(1, "#fbc02d");
+                ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, borderThickness, borderThickness, imgW, imgH);
+            } else {
+                width = 400; height = 500;
+                canvas.width = width; canvas.height = height;
+                const gradient = ctx.createLinearGradient(0, 0, width, height);
+                gradient.addColorStop(0, "#ffd700"); gradient.addColorStop(0.5, "#ffeb3b"); gradient.addColorStop(1, "#fbc02d");
+                ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
+                const border = 20;
+                const photoW = width - border * 2;
+                const photoH = height - border * 2;
+                const grd = ctx.createLinearGradient(border, border, border, border + photoH);
+                grd.addColorStop(0, "#b30000"); grd.addColorStop(1, "#800000");
+                ctx.fillStyle = grd; ctx.fillRect(border, border, photoW, photoH);
+                ctx.fillStyle = '#ffd700'; ctx.font = 'bold 50px Arial';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('MEMORY', width / 2, height / 2 - 30);
+                ctx.font = '40px Arial'; ctx.fillText('#' + (index + 1), width / 2, height / 2 + 30);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            tex.repeat.set(-1, 1);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.center.set(0.5, 0.5);
+            return tex;
+        }
+        function createTreeLights() {
+            const baseLightCount = 500;   // TREE模式显示数量
+            const maxLightCount = 10000;   // SCATTER模式显示数量
+            const lightGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(maxLightCount * 3);
+            const colors = new Float32Array(maxLightCount * 3);
+            const sizes = new Float32Array(maxLightCount);
+            const phases = new Float32Array(maxLightCount);
+            // 预计算所有彩灯的位置
+            const treePositions = [];     // 树上位置（前500个形成完美树形）
+            const scatterPositions = [];  // 散开位置（5000个）
+            const heartPositions = [];    // 心形位置
+            const lightPhases = [];
+            const colorSequence = [
+                new THREE.Color(0xff0000), // 红
+                new THREE.Color(0x00ff00), // 绿
+                new THREE.Color(0x0000ff), // 蓝
+                new THREE.Color(0xffff00), // 黄
+                new THREE.Color(0xff00ff), // 紫
+                new THREE.Color(0x00ffff)  // 青
+            ];
+            // 【新增】预计算心形位置
+            function generateHeartPositions(count) {
+                const positions = [];
+                const heartShape = createHeartShape(CONFIG.heartSize * 0.8);
+                for (let i = 0; i < count; i++) {
+                    const t = i / count;
+                    const angle = t * Math.PI * 2;
+                    // 心形参数方程
+                    const x = CONFIG.heartSize * 16 * Math.pow(Math.sin(angle), 3);
+                    const y = CONFIG.heartSize * (13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle));
+                    const z = Math.sin(angle * 5) * 5; // 轻微起伏
+                    positions.push(new THREE.Vector3(x, y, z));
+                }
+                return positions;
+            }
+            const heartLightPositions = generateHeartPositions(maxLightCount);
+            // 预先计算所有彩灯的位置
+            for (let i = 0; i < maxLightCount; i++) {
+                const phase = Math.random() * Math.PI * 2;
+                lightPhases.push(phase);
+                // === 树上位置（只对前500个彩灯计算完美的树形分布）===
+                let treePos;
+                if (i < baseLightCount) {
+                    // 基于500个彩灯均匀分布在整棵树上
+                    const hNorm = i / baseLightCount;
+                    const treeY = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2) + 5;
+                    const treeRadius = Math.pow((1 - hNorm), 0.9) * CONFIG.treeRadius * 1.1;
+                    const treeAngle = i * 0.8 + Math.sin(i * 0.3) * 0.5;
+                    treePos = new THREE.Vector3(
+                        Math.cos(treeAngle) * treeRadius,
+                        treeY,
+                        Math.sin(treeAngle) * treeRadius
+                    );
+                } else {
+                    // 后4500个彩灯在树上的位置设为(0,0,0)，因为它们在TREE模式下不可见
+                    treePos = new THREE.Vector3(0, 0, 0);
+                }
+                treePositions.push(treePos);
+                // === 散开位置（所有5000个彩灯）===
+                const scatterRadius = 80 + Math.random() * 50;
+                const phi = Math.acos(-1 + 2 * Math.random());
+                const theta = Math.sqrt(Math.PI * maxLightCount) * phi + i * 0.1;
+                const scatterPos = new THREE.Vector3().setFromSphericalCoords(scatterRadius, phi, theta);
+                scatterPositions.push(scatterPos);
+                // === 心形位置 ===
+                heartPositions.push(heartLightPositions[i % heartLightPositions.length]);
+                // 初始位置：前500个在树上，其余在散开位置
+                if (i < baseLightCount) {
+                    positions[i * 3] = treePos.x;
+                    positions[i * 3 + 1] = treePos.y;
+                    positions[i * 3 + 2] = treePos.z;
+                } else {
+                    positions[i * 3] = scatterPos.x;
+                    positions[i * 3 + 1] = scatterPos.y;
+                    positions[i * 3 + 2] = scatterPos.z;
+                }
+                // 颜色和大小
+                const color = colorSequence[i % colorSequence.length];
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+                sizes[i] = 8.2 + Math.sin(i * 0.5) * 1.3;
+                phases[i] = phase;
+            }
+            lightGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            lightGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            lightGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            lightGeometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+            const lightMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uPixelRatio: { value: renderer.getPixelRatio() },
+                    uMode: { value: 0.0 }, // 0 = TREE, 1 = SCATTER, 0.5 = HEART
+                    uHeartProgress: { value: 0.0 }, // 心形转换进度
+                    uMaxIndex: { value: baseLightCount } // 当前最大显示索引
+                },
+                vertexShader: `
+attribute float size;
+attribute float phase;
+varying vec3 vColor;
+varying float vBrightness;
+uniform float uTime;
+uniform float uPixelRatio;
+uniform float uMode;
+uniform float uHeartProgress;
+uniform float uMaxIndex;
+// 从顶点ID获取索引
+int getVertexIndex() {
+return int(gl_VertexID);
+}
+void main() {
+vColor = color;
+// 检查是否超出显示范围
+int vertexIndex = getVertexIndex();
+if (float(vertexIndex) >= uMaxIndex) {
+// 将超出范围的彩灯移到屏幕外
+gl_Position = vec4(0.0, -1000.0, 0.0, 1.0);
+return;
+}
+// 闪烁效果
+float twinkleSpeed = 3.0 + phase * 2.0;
+float twinkle = 0.6 + 0.4 * sin(uTime * twinkleSpeed + phase * 6.2831);
+// TREE 模式：序列闪烁
+float sequencePos = mod(uTime * 4.0 + phase, 6.2831);
+float distanceToWave = abs(sequencePos - 3.1415);
+float sequenceBrightness = smoothstep(2.0, 0.0, distanceToWave);
+// SCATTER 模式：更随机的闪烁
+float scatterBrightness = 0.5 + 0.5 * sin(uTime * 2.0 + phase * 5.0);
+// 心形模式：脉动效果
+float heartPulse = 0.5 + 0.5 * sin(uTime * 3.0 + phase * 2.0);
+// 混合三种模式
+vBrightness = mix(
+mix(sequenceBrightness, scatterBrightness, uMode),
+heartPulse,
+uHeartProgress
+) * twinkle * 1.5;
+vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+gl_PointSize = size * uPixelRatio * vBrightness * (100.0 / -mvPosition.z);
+gl_PointSize = max(gl_PointSize, 0.8);
+gl_Position = projectionMatrix * mvPosition;
+}
+`,
+                fragmentShader: `
+varying vec3 vColor;
+varying float vBrightness;
+void main() {
+vec2 center = gl_PointCoord - vec2(0.5);
+float dist = length(center);
+if (dist > 0.5) discard;
+// 发光效果
+float glow = smoothstep(0.5, 0.0, dist);
+float core = smoothstep(0.3, 0.0, dist) * 1.5;
+float alpha = (glow + core) * vBrightness;
+// 星芒效果
+vec2 absCenter = abs(center);
+float cross = smoothstep(0.05, 0.0, min(absCenter.x, absCenter.y)) * 0.8;
+alpha += cross * vBrightness * 0.5;
+gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
+}
+`,
+                transparent: true,
+                vertexColors: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const treeLights = new THREE.Points(lightGeometry, lightMaterial);
+            scene.add(treeLights);
+            return {
+                update(time) {
+                    const positions = lightGeometry.attributes.position.array;
+                    // 根据模式确定目标模式值和目标数量
+                    let targetMode = 0.0;
+                    let targetHeartProgress = 0.0;
+                    let targetMaxIndex = baseLightCount;
+                    if (STATE.mode === 'TREE') {
+                        targetMode = 0.0;
+                        targetHeartProgress = 0.0;
+                        targetMaxIndex = baseLightCount;
+                    } else if (STATE.mode === 'SCATTER') {
+                        targetMode = 1.0;
+                        targetHeartProgress = 0.0;
+                        targetMaxIndex = maxLightCount;
+                    } else if (STATE.mode === 'INSPECT') {
+                        targetMode = 1.0;
+                        targetHeartProgress = 0.0;
+                        targetMaxIndex = maxLightCount;
+                    } else if (STATE.mode === 'HEART') {
+                        targetMode = 0.5; // 心形模式的特殊值
+                        targetHeartProgress = 1.0;
+                        targetMaxIndex = maxLightCount;
+                    }
+                    // 平滑过渡模式值
+                    const currentMode = lightMaterial.uniforms.uMode.value;
+                    const currentHeartProgress = lightMaterial.uniforms.uHeartProgress.value;
+                    const newMode = THREE.MathUtils.lerp(currentMode, targetMode, 0.05);
+                    const newHeartProgress = THREE.MathUtils.lerp(currentHeartProgress, targetHeartProgress, 0.05);
+                    lightMaterial.uniforms.uMode.value = newMode;
+                    lightMaterial.uniforms.uHeartProgress.value = newHeartProgress;
+                    // 平滑过渡显示数量
+                    const currentMaxIndex = lightMaterial.uniforms.uMaxIndex.value;
+                    const newMaxIndex = THREE.MathUtils.lerp(currentMaxIndex, targetMaxIndex, 0.03);
+                    lightMaterial.uniforms.uMaxIndex.value = newMaxIndex;
+                    // 更新每个彩灯的位置
+                    for (let i = 0; i < maxLightCount; i++) {
+                        // 只更新当前可见的彩灯
+                        if (i >= newMaxIndex) continue;
+                        const phase = lightPhases[i];
+                        // 混合位置：根据当前模式和心形进度
+                        if (newHeartProgress > 0.5) {
+                            // 心形模式主导
+                            const heartPos = heartPositions[i].clone();
+                            // 心形脉动动画
+                            heartPos.y += Math.sin(time * 2.0 + phase) * 2.0;
+                            heartPos.x *= 0.8 + Math.sin(time * 1.5 + phase * 0.5) * 0.1;
+                            heartPos.z *= 0.8 + Math.sin(time * 1.7 + phase * 0.7) * 0.1;
+                            positions[i * 3] = heartPos.x;
+                            positions[i * 3 + 1] = heartPos.y;
+                            positions[i * 3 + 2] = heartPos.z;
+                        } else if (newMode < 0.5) {
+                            // === TREE 模式：使用完美的树形分布 + 动画 ===
+                            if (i < baseLightCount) {
+                                const treePos = treePositions[i].clone();
+                                // 树的旋转动画
+                                const treeRotation = time * 0.4;
+                                const x = treePos.x * Math.cos(treeRotation) - treePos.z * Math.sin(treeRotation);
+                                const z = treePos.x * Math.sin(treeRotation) + treePos.z * Math.cos(treeRotation);
+                                // 轻微摆动
+                                const y = treePos.y + Math.sin(time * 1.5 + phase) * 3.3;
+                                positions[i * 3] = x;
+                                positions[i * 3 + 1] = y;
+                                positions[i * 3 + 2] = z;
+                            } else {
+                                // 理论上不会执行到这里，因为TREE模式下i >= baseLightCount的彩灯不可见
+                                positions[i * 3] = 0;
+                                positions[i * 3 + 1] = 0;
+                                positions[i * 3 + 2] = 0;
+                            }
+                        } else {
+                            // === SCATTER 模式：使用散开位置 + 动画 ===
+                            const scatterPos = scatterPositions[i].clone();
+                            // 飘浮动画
+                            scatterPos.y += Math.sin(time + phase) * 3;
+                            // 向相机方向聚集
+                            const ndcPos = scatterPos.clone().project(camera);
+                            const distToCenter = Math.hypot(ndcPos.x, ndcPos.y);
+                            if (ndcPos.z < 1 && distToCenter < 0.8) {
+                                const pullStrength = Math.pow(1 - distToCenter, 2) * 20;
+                                const pullDir = camera.position.clone().sub(scatterPos).normalize();
+                                scatterPos.add(pullDir.multiplyScalar(pullStrength));
+                            }
+                            positions[i * 3] = scatterPos.x;
+                            positions[i * 3 + 1] = scatterPos.y;
+                            positions[i * 3 + 2] = scatterPos.z;
+                        }
+                    }
+                    lightGeometry.attributes.position.needsUpdate = true;
+                    lightMaterial.uniforms.uTime.value = time;
+                }
+            };
+        }
+        // 创建彩灯系统
+        const treeLightsSystem = createTreeLights();
+        function createObject(type, index) {
+            let mesh;
+            let isPhoto = false;
+            let baseScale = null;
+            if (type === 'photo') {
+                const geo = new THREE.PlaneGeometry(1, 1);
+                const tex = createPhotoTexture(null, index);
+                const mat = matPhotoBase.clone();
+                mat.map = tex;
+                mesh = new THREE.Mesh(geo, mat);
+                isPhoto = true;
+                baseScale = new THREE.Vector3(6, 6.5, 1);
+                mesh.scale.copy(baseScale);
+                mesh.userData.originalMat = mat;
+            } else {
+                const rand = Math.random();
+                if (rand < 0.65) mesh = new THREE.Mesh(sphereGeo, matGreen);
+                else if (rand < 0.85) mesh = new THREE.Mesh(sphereGeo, matGold);
+                else mesh = new THREE.Mesh(boxGeo, matRed);
+            }
+            // 【改进】更随机的照片分布，避免顶部汇聚
+            let hNorm, angle;
+            if (type === 'photo') {
+                // 照片：使用随机分布，避免顶部汇聚
+                const seed = index * 13; // 使用确定性种子，保证每次刷新位置一致
+                const rand = (Math.sin(seed) + 1) / 2; // 伪随机数 0-1
+                // 使用指数分布，让照片更多分布在中下部（更自然）
+                // 指数分布公式：1 - e^(-λx)，λ控制分布密度
+                const lambda = 1.1; // λ越大，越集中在底部
+                hNorm = 1 - Math.exp(-lambda * rand);
+                // 随机角度，避免照片在同一垂直线上
+                angle = (Math.sin(seed * 789) + 1) * Math.PI;
+            } else {
+                // 粒子：保持原有逻辑
+                hNorm = (index + CONFIG.photoCount) / (CONFIG.particleCount + CONFIG.photoCount);
+                angle = index * 0.5;
+            }
+            const y = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2);
+            const radius = Math.pow((1 - hNorm), 0.9) * CONFIG.treeRadius;
+            const treePos = new THREE.Vector3(
+                Math.cos(angle * 10) * radius,
+                y,
+                Math.sin(angle * 10) * radius
+            );
+            const scatterRadius = 70 + Math.random() * 30;
+            const phi = Math.acos(-1 + (2 * Math.random()));
+            const theta = Math.sqrt(Math.PI * (CONFIG.particleCount + CONFIG.photoCount)) * phi;
+            const scatterPos = new THREE.Vector3().setFromSphericalCoords(scatterRadius, phi, theta);
+            // 【修复】心形位置：为所有对象创建心形位置
+            const heartShape = createHeartShape(CONFIG.heartSize);
+            const heartT = index / (CONFIG.particleCount + CONFIG.photoCount + 1); // 避免除以0
+            const heartAngle = heartT * Math.PI * 2;
+            const heartX = CONFIG.heartSize * 16 * Math.pow(Math.sin(heartAngle), 3);
+            const heartY = CONFIG.heartSize * (13 * Math.cos(heartAngle) - 5 * Math.cos(2 * heartAngle) - 2 * Math.cos(3 * heartAngle) - Math.cos(4 * heartAngle));
+            const heartPos = new THREE.Vector3(heartX, heartY, 0);
+            // Save original material reference
+            const originalMat = (type === 'photo' && mesh) ? mesh.material : null;
+            mesh.userData = {
+                id: index,
+                isPhoto: isPhoto,
+                baseScale: baseScale,
+                treePos: treePos,
+                scatterPos: scatterPos,
+                heartPos: heartPos, // 确保所有对象都有 heartPos
+                targetQuaternion: new THREE.Quaternion(),
+                phase: Math.random() * Math.PI * 2,
+                usingBasicMat: false,
+                originalMat: originalMat,
+                isHeartPhoto: false // 标记是否是心形中的照片
+            };
+            mesh.position.copy(treePos);
+            if (!isPhoto) mesh.rotation.set(Math.random(), Math.random(), 0);
+            else mesh.lookAt(0, y, 0);
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+        for (let i = 0; i < CONFIG.photoCount; i++) createObject('photo', i);
+        for (let i = 0; i < CONFIG.particleCount; i++) createObject('particle', i);
+        const fileInput = document.getElementById('file-input');
+        fileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            const photoObjects = objects.filter(o => o.userData.isPhoto);
+            let fileIdx = 0;
+            photoObjects.forEach((mesh, i) => {
+                const file = files[fileIdx % files.length];
+                fileIdx++;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const tex = createPhotoTexture(img, i, true);
+                        if (mesh.userData.originalMat) mesh.userData.originalMat.map = tex;
+                        if (mesh.userData.usingBasicMat) {
+                            mesh.material.map = tex;
+                        } else {
+                            mesh.material.map = tex;
+                        }
+                        mesh.material.needsUpdate = true;
+                        const aspect = tex.image.width / tex.image.height;
+                        if (mesh.userData.baseScale) {
+                            mesh.userData.baseScale.set(5.5 * aspect, 5.5, 1);
+                        }
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+        // ================= 4. MediaPipe 手势识别 =================
+        const videoElement = document.getElementById('input_video');
+        const debugCanvas = document.getElementById('debug-cam');
+        const debugCtx = debugCanvas.getContext('2d');
+        const statusDiv = document.getElementById('status-bar');
+        function onResults(results) {
+            const loader = document.getElementById('loader');
+            if (loader.style.display !== 'none') {
+                loader.style.opacity = 0;
+                setTimeout(() => loader.style.display = 'none', 800);
+            }
+            debugCtx.save();
+            debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+            debugCtx.drawImage(results.image, 0, 0, debugCanvas.width, debugCanvas.height);
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                STATE.handDetected = true;
+                const landmarks = results.multiHandLandmarks[0];
+                if (window.drawConnectors && window.HAND_CONNECTIONS) {
+                    window.drawConnectors(debugCtx, landmarks, window.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+                }
+                const palmX = landmarks[9].x;
+                const palmY = landmarks[9].y;
+                STATE.handPosition.x = (palmX - 0.5) * 3.0;
+                STATE.handPosition.y = (palmY - 0.5) * 3.0;
+                // 【核心】手势测距变焦：映射手部大小 (0.05-0.25) 到摄像机距离 (140-200)
+                const wrist = landmarks[0];
+                const middleMCP = landmarks[9];
+                const handSize = Math.hypot(middleMCP.x - wrist.x, middleMCP.y - wrist.y);
+                const minHand = 0.05;
+                const maxHand = 0.25;
+                // 【修改】缩小后的变焦范围 140-200
+                const minRad = 140;
+                const maxRad = 200;
+                let t = (handSize - minHand) / (maxHand - minHand);
+                t = Math.max(0, Math.min(1, t));
+                // 手越近(t->1)，距离越近(minRad)
+                STATE.targetCameraRadius = (1 - t) * (maxRad - minRad) + minRad;
+                // 手势识别函数
+                const isFingerExtended = (tipIdx, pipIdx) => {
+                    const dTip = Math.hypot(landmarks[tipIdx].x - landmarks[0].x, landmarks[tipIdx].y - landmarks[0].y);
+                    const dPip = Math.hypot(landmarks[pipIdx].x - landmarks[0].x, landmarks[pipIdx].y - landmarks[0].y);
+                    return dTip > dPip * 1.1;
+                };
+                // 检测各个手指是否伸直
+                const indexExt = isFingerExtended(8, 6);   // 食指
+                const middleExt = isFingerExtended(12, 10); // 中指
+                const ringExt = isFingerExtended(16, 14);   // 无名指
+                const pinkyExt = isFingerExtended(20, 18);  // 小指
+                // V字手势：食指和中指伸直，其他手指弯曲
+                const vGesture = indexExt && middleExt && !ringExt && !pinkyExt;
+                const extendedCount = [indexExt, middleExt, ringExt, pinkyExt].filter(Boolean).length;
+                const pinchDist = Math.hypot(landmarks[8].x - landmarks[4].x, landmarks[8].y - landmarks[4].y);
+                STATE.pinchDistance = pinchDist;
+                const now = Date.now();
+                // 【修改】V字手势检测 - 心形模式下使用更近的摄像机距离
+                if (vGesture && STATE.mode !== 'HEART' && (now - STATE.lastModeTime > 1000)) {
+                    STATE.mode = 'HEART';
+                    STATE.lastModeTime = now;
+                    // 【优化】心形模式使用更近的摄像机距离
+                    STATE.targetCameraRadius = 120;
+                    statusDiv.innerText = "❤️ 状态: 爱心模式";
+                    statusDiv.style.backgroundColor = "rgba(255, 50, 100, 0.8)";
+                }
+                // 其他手势检测
+                else if (pinchDist < 0.05 && extendedCount >= 1 && STATE.mode !== 'INSPECT' && (now - STATE.lastModeTime > 1000)) {
+                    STATE.mode = 'INSPECT';
+                    STATE.lastModeTime = now;
+                    const photoObjs = objects.filter(o => o.userData.isPhoto);
+                    let closestPhoto = null;
+                    let minDist = Infinity;
+                    photoObjs.forEach(obj => {
+                        if (obj.position.dot(camera.position) > 0) {
+                            const screenPos = obj.position.clone().project(camera);
+                            const dist = Math.hypot(screenPos.x, screenPos.y);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestPhoto = obj;
+                            }
+                        }
+                    });
+                    if (closestPhoto) {
+                        STATE.activePhotoIndex = closestPhoto.userData.id;
+                    }
+                    statusDiv.innerText = "🔍 状态: 浏览回忆";
+                    statusDiv.style.backgroundColor = "rgba(180, 50, 50, 0.8)";
+                } else if (extendedCount >= 4 && STATE.mode !== 'SCATTER' && pinchDist > 0.1) {
+                    STATE.mode = 'SCATTER';
+                    statusDiv.innerText = "✨ 状态: 星空漫游";
+                    statusDiv.style.backgroundColor = "rgba(220, 180, 0, 0.8)";
+                } else if (extendedCount === 0 && STATE.mode !== 'TREE' && pinchDist > 0.1) {
+                    STATE.mode = 'TREE';
+                    statusDiv.innerText = "🎄 状态: 圣诞树";
+                    statusDiv.style.backgroundColor = "rgba(20, 80, 40, 0.8)";
+                    // 退出心形模式时重置照片状态
+                    if (STATE.mode === 'TREE') {
+                        objects.forEach(obj => {
+                            if (obj.userData.isPhoto && obj.userData.isHeartPhoto) {
+                                obj.userData.isHeartPhoto = false;
+                                obj.scale.copy(obj.userData.baseScale || new THREE.Vector3(1, 1, 1));
+                            }
+                        });
+                    }
+                }
+            } else {
+                STATE.handDetected = false;
+                // 【核心】无手势时，自动退回到最远距离
+                STATE.targetCameraRadius = 200;
+                statusDiv.innerText = "等待手势...";
+                statusDiv.style.backgroundColor = "rgba(0,0,0,0.4)";
+            }
+            debugCtx.restore();
+        }
+        if (window.Hands) {
+            const hands = new window.Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            hands.onResults(onResults);
+            if (window.Camera) {
+                const cameraUtils = new window.Camera(videoElement, { onFrame: async () => { await hands.send({ image: videoElement }); }, width: 320, height: 240 });
+                cameraUtils.start();
+            }
+        } else { document.getElementById('loader').innerText = "错误: 无法加载 AI 模型"; }
+        // ================= 星空粒子系统 =================
+        function createStarField() {
+            // --- 第一层：远景密集小星 (静态闪烁) ---
+            const starCount = 8000;
+            const starGeometry = new THREE.BufferGeometry();
+            const starPositions = new Float32Array(starCount * 3);
+            const starColors = new Float32Array(starCount * 3);
+            const starSizes = new Float32Array(starCount);
+            const starPhases = new Float32Array(starCount); // 闪烁相位
+            const colorPalette = [
+                new THREE.Color(0xffffff), // 白色
+                new THREE.Color(0xaaccff), // 蓝白
+                new THREE.Color(0xffeedd), // 暖白
+                new THREE.Color(0xffd700), // 金色 (少量)
+                new THREE.Color(0xff9999), // 淡红 (少量)
+                new THREE.Color(0xccddff), // 冰蓝
+            ];
+            const colorWeights = [0.45, 0.2, 0.2, 0.06, 0.04, 0.05]; // 权重
+            function weightedRandomColor() {
+                let r = Math.random();
+                let cumulative = 0;
+                for (let i = 0; i < colorWeights.length; i++) {
+                    cumulative += colorWeights[i];
+                    if (r < cumulative) return colorPalette[i];
+                }
+                return colorPalette[0];
+            }
+            for (let i = 0; i < starCount; i++) {
+                // 分布在 150~450 半径的球壳上
+                const radius = 150 + Math.random() * 300;
+                const phi = Math.acos(-1 + 2 * Math.random());
+                const theta = Math.random() * Math.PI * 2;
+                starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+                starPositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                starPositions[i * 3 + 2] = radius * Math.cos(phi);
+                const col = weightedRandomColor();
+                starColors[i * 3] = col.r;
+                starColors[i * 3 + 1] = col.g;
+                starColors[i * 3 + 2] = col.b;
+                // 大小：大多数很小，偶尔有几颗亮的
+                const sizeRand = Math.random();
+                if (sizeRand < 0.85) {
+                    starSizes[i] = 0.3 + Math.random() * 2.6;  // 小星
+                } else if (sizeRand < 0.97) {
+                    starSizes[i] = 0.8 + Math.random() * 4.2;  // 中星
+                } else {
+                    starSizes[i] = 1.8 + Math.random() * 8.0;  // 大亮星
+                }
+                starPhases[i] = Math.random() * Math.PI * 2;
+            }
+            starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+            starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+            starGeometry.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+            starGeometry.setAttribute('phase', new THREE.BufferAttribute(starPhases, 1));
+            // 自定义 Shader 实现闪烁
+            const starMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uPixelRatio: { value: renderer.getPixelRatio() }
+                },
+                vertexShader: `
+attribute float size;
+attribute float phase;
+varying vec3 vColor;
+varying float vBrightness;
+uniform float uTime;
+uniform float uPixelRatio;
+void main() {
+vColor = color;
+// 闪烁：每颗星有不同的频率和相位
+float twinkleSpeed = 0.5 + phase * 0.8;
+float twinkle = 0.6 + 0.4 * sin(uTime * twinkleSpeed + phase * 6.2831);
+vBrightness = twinkle;
+vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+gl_PointSize = size * uPixelRatio * twinkle * (200.0 / -mvPosition.z);
+gl_PointSize = max(gl_PointSize, 0.5);
+gl_Position = projectionMatrix * mvPosition;
+}
+`,
+                fragmentShader: `
+varying vec3 vColor;
+varying float vBrightness;
+void main() {
+// 圆形光晕粒子
+vec2 center = gl_PointCoord - vec2(0.5);
+float dist = length(center);
+if (dist > 0.5) discard;
+// 柔和的星芒效果：中心亮 + 外围光晕
+float core = smoothstep(0.5, 0.0, dist);
+float glow = smoothstep(0.5, 0.1, dist) * 0.6;
+float alpha = (core + glow) * vBrightness;
+// 亮星加十字星芒
+vec2 absCenter = abs(center);
+float cross = smoothstep(0.02, 0.0, min(absCenter.x, absCenter.y)) * 0.3;
+alpha += cross * vBrightness;
+gl_FragColor = vec4(vColor * (0.8 + vBrightness * 0.5), alpha);
+}
+`,
+                transparent: true,
+                vertexColors: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const starField = new THREE.Points(starGeometry, starMaterial);
+            starField.renderOrder = -1; // 确保在最底层渲染
+            scene.add(starField);
+            // --- 第二层：近景飘浮微尘 (缓慢漂移) ---
+            const dustCount = 500;
+            const dustGeometry = new THREE.BufferGeometry();
+            const dustPositions = new Float32Array(dustCount * 3);
+            const dustSizes = new Float32Array(dustCount);
+            const dustPhases = new Float32Array(dustCount);
+            const dustVelocities = [];
+            for (let i = 0; i < dustCount; i++) {
+                dustPositions[i * 3] = (Math.random() - 0.5) * 250;
+                dustPositions[i * 3 + 1] = (Math.random() - 0.5) * 250;
+                dustPositions[i * 3 + 2] = (Math.random() - 0.5) * 250;
+                dustSizes[i] = 0.2 + Math.random() * 0.4;
+                dustPhases[i] = Math.random() * Math.PI * 2;
+                dustVelocities.push({
+                    x: (Math.random() - 0.5) * 0.02,
+                    y: (Math.random() - 0.5) * 0.015,
+                    z: (Math.random() - 0.5) * 0.02
+                });
+            }
+            dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+            dustGeometry.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
+            dustGeometry.setAttribute('phase', new THREE.BufferAttribute(dustPhases, 1));
+            const dustMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uPixelRatio: { value: renderer.getPixelRatio() }
+                },
+                vertexShader: `
+attribute float size;
+attribute float phase;
+varying float vAlpha;
+uniform float uTime;
+uniform float uPixelRatio;
+void main() {
+float pulse = 0.3 + 0.7 * sin(uTime * 0.3 + phase * 6.2831);
+vAlpha = pulse * 0.15;
+vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+gl_PointSize = size * uPixelRatio * pulse * (100.0 / -mvPosition.z);
+gl_PointSize = max(gl_PointSize, 0.3);
+gl_Position = projectionMatrix * mvPosition;
+}
+`,
+                fragmentShader: `
+varying float vAlpha;
+void main() {
+vec2 center = gl_PointCoord - vec2(0.5);
+float dist = length(center);
+if (dist > 0.5) discard;
+float alpha = smoothstep(0.5, 0.0, dist) * vAlpha;
+gl_FragColor = vec4(0.6, 0.7, 1.0, alpha);
+}
+`,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const dustField = new THREE.Points(dustGeometry, dustMaterial);
+            scene.add(dustField);
+            // --- 第三层：银河带 (密集的弧形星带) ---
+            const milkyWayCount = 3000;
+            const milkyWayGeometry = new THREE.BufferGeometry();
+            const mwPositions = new Float32Array(milkyWayCount * 3);
+            const mwColors = new Float32Array(milkyWayCount * 3);
+            const mwSizes = new Float32Array(milkyWayCount);
+            const mwPhases = new Float32Array(milkyWayCount);
+            for (let i = 0; i < milkyWayCount; i++) {
+                // 银河带：在一个倾斜的环形带上分布
+                const bandRadius = 280 + (Math.random() - 0.5) * 80;
+                const bandAngle = Math.random() * Math.PI * 2;
+                const bandWidth = (Math.random() - 0.5) * 25; // 窄带
+                mwPositions[i * 3] = bandRadius * Math.cos(bandAngle);
+                mwPositions[i * 3 + 1] = bandWidth + Math.sin(bandAngle * 3) * 8; // 波浪起伏
+                mwPositions[i * 3 + 2] = bandRadius * Math.sin(bandAngle);
+                // 银河颜色偏蓝紫
+                const mwColor = new THREE.Color().setHSL(
+                    0.55 + Math.random() * 0.15,  // 色相：蓝到紫
+                    0.2 + Math.random() * 0.3,    // 低饱和度
+                    0.5 + Math.random() * 0.4     // 中高亮度
+                );
+                mwColors[i * 3] = mwColor.r;
+                mwColors[i * 3 + 1] = mwColor.g;
+                mwColors[i * 3 + 2] = mwColor.b;
+                mwSizes[i] = 0.2 + Math.random() * 10.5;
+                mwPhases[i] = Math.random() * Math.PI * 2;
+            }
+            milkyWayGeometry.setAttribute('position', new THREE.BufferAttribute(mwPositions, 3));
+            milkyWayGeometry.setAttribute('color', new THREE.BufferAttribute(mwColors, 3));
+            milkyWayGeometry.setAttribute('size', new THREE.BufferAttribute(mwSizes, 1));
+            milkyWayGeometry.setAttribute('phase', new THREE.BufferAttribute(mwPhases, 1));
+            const milkyWayMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uPixelRatio: { value: renderer.getPixelRatio() }
+                },
+                vertexShader: `
+attribute float size;
+attribute float phase;
+varying vec3 vColor;
+varying float vBrightness;
+uniform float uTime;
+uniform float uPixelRatio;
+void main() {
+vColor = color;
+float twinkle = 0.5 + 0.5 * sin(uTime * 0.4 + phase * 6.2831);
+vBrightness = twinkle;
+vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+gl_PointSize = size * uPixelRatio * twinkle * (180.0 / -mvPosition.z);
+gl_PointSize = max(gl_PointSize, 0.3);
+gl_Position = projectionMatrix * mvPosition;
+}
+`,
+                fragmentShader: `
+varying vec3 vColor;
+varying float vBrightness;
+void main() {
+vec2 center = gl_PointCoord - vec2(0.5);
+float dist = length(center);
+if (dist > 0.5) discard;
+float alpha = smoothstep(0.5, 0.0, dist) * vBrightness * 0.6;
+gl_FragColor = vec4(vColor, alpha);
+}
+`,
+                transparent: true,
+                vertexColors: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const milkyWay = new THREE.Points(milkyWayGeometry, milkyWayMaterial);
+            // 倾斜银河带 45 度
+            milkyWay.rotation.x = Math.PI * 0.25;
+            milkyWay.rotation.z = Math.PI * 0.15;
+            scene.add(milkyWay);
+            // --- 返回 update 函数，在动画循环中调用 ---
+            return {
+                update(time) {
+                    // 更新 uniform 驱动闪烁
+                    starMaterial.uniforms.uTime.value = time;
+                    dustMaterial.uniforms.uTime.value = time;
+                    milkyWayMaterial.uniforms.uTime.value = time;
+                    // 远景星空极慢旋转
+                    starField.rotation.y = time * 0.005;
+                    starField.rotation.x = Math.sin(time * 0.003) * 0.02;
+                    // 银河带缓慢旋转
+                    milkyWay.rotation.y = time * 0.008;
+                    // 微尘漂移
+                    const positions = dustGeometry.attributes.position.array;
+                    for (let i = 0; i < dustCount; i++) {
+                        positions[i * 3] += dustVelocities[i].x;
+                        positions[i * 3 + 1] += dustVelocities[i].y;
+                        positions[i * 3 + 2] += dustVelocities[i].z;
+                        // 边界循环
+                        const bound = 125;
+                        if (Math.abs(positions[i * 3]) > bound) positions[i * 3] *= -0.9;
+                        if (Math.abs(positions[i * 3 + 1]) > bound) positions[i * 3 + 1] *= -0.9;
+                        if (Math.abs(positions[i * 3 + 2]) > bound) positions[i * 3 + 2] *= -0.9;
+                    }
+                    dustGeometry.attributes.position.needsUpdate = true;
+                }
+            };
+        }
+        const starSystem = createStarField();
+        // ================= 5. 动画循环 =================
+        function lerp(start, end, alpha) { return start * (1 - alpha) + end * alpha; }
+        function updatePhysics(time) {
+            const cameraForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            // 【动态灯光控制】
+            let targetLightY_Point, targetLightY_Rim, targetLightY_Front;
+            let targetIntensity_Point, targetIntensity_Front, targetIntensity_Ambient;
+            if (STATE.mode === 'TREE') {
+                // 基础位置
+                targetLightY_Point = 0;
+                targetLightY_Rim = 20;
+                targetLightY_Front = 5;
+                // 闪烁效果：让灯光强度周期性变化
+                const flashSpeed = 3.0; // 闪烁速度
+                const flashIntensity = 0.3; // 闪烁强度
+                // 主灯光闪烁
+                const pointFlash = 1.0 + Math.sin(time * flashSpeed + 0.0) * flashIntensity;
+                targetIntensity_Point = 8.0 * pointFlash;
+                // 前灯光闪烁（不同相位）
+                const frontFlash = 5.0 + Math.sin(time * flashSpeed + 2.1) * flashIntensity * 0.7;
+                targetIntensity_Front = 3.5 * frontFlash;
+                // 环境光闪烁（更平缓）
+                const ambientFlash = 5.0 + Math.sin(time * flashSpeed * 0.5 + 1.3) * flashIntensity * 0.5;
+                targetIntensity_Ambient = 2.5 * ambientFlash;
+            } else if (STATE.mode === 'INSPECT') {
+                // 拾取照片：升高灯光，亮度降低至 40% (8.0 -> 3.2, 3.5 -> 1.4, 2.5 -> 1.0)
+                targetLightY_Point = 100;
+                targetLightY_Rim = 100;
+                targetLightY_Front = 60;
+                targetIntensity_Point = 3.2;  // 8.0 * 0.4
+                targetIntensity_Front = 1.4;  // 3.5 * 0.4
+                targetIntensity_Ambient = 1.0; // 2.5 * 0.4
+            } else if (STATE.mode === 'HEART') {
+                // 心形模式：灯光集中在心形中心
+                targetLightY_Point = 30;
+                targetLightY_Rim = 40;
+                targetLightY_Front = 20;
+                // 心形脉动灯光效果
+                const heartPulse = 0.5 + 0.5 * Math.sin(time * 2.0);
+                targetIntensity_Point = 10.0 * heartPulse;
+                targetIntensity_Front = 4.0 * heartPulse;
+                targetIntensity_Ambient = 3.0 * heartPulse;
+            } else {
+                // SCATTER
+                targetLightY_Point = 40;
+                targetLightY_Rim = 50;
+                targetLightY_Front = 20;
+                targetIntensity_Point = 8.0;
+                targetIntensity_Front = 3.5;
+                targetIntensity_Ambient = 2.5;
+            }
+            pointLight.position.y = lerp(pointLight.position.y, targetLightY_Point, 0.04);
+            rimLight.position.y = lerp(rimLight.position.y, targetLightY_Rim, 0.04);
+            frontLight.position.y = lerp(frontLight.position.y, targetLightY_Front, 0.04);
+            pointLight.intensity = lerp(pointLight.intensity, targetIntensity_Point, 0.05);
+            frontLight.intensity = lerp(frontLight.intensity, targetIntensity_Front, 0.05);
+            ambientLight.intensity = lerp(ambientLight.intensity, targetIntensity_Ambient, 0.05);
+            // 【新增】心形转换进度
+            if (STATE.mode === 'HEART') {
+                STATE.heartProgress = lerp(STATE.heartProgress, 1.0, 0.03);
+            } else {
+                STATE.heartProgress = lerp(STATE.heartProgress, 0.0, 0.03);
+            }
+            objects.forEach(obj => {
+                let targetPos = new THREE.Vector3();
+                let targetScaleMult = 1.0;
+                let targetRot = new THREE.Quaternion();
+                // 【核心】心形模式逻辑
+                if (STATE.mode === 'HEART') {
+                    if (obj.userData.isPhoto) {
+                        // 照片：整齐排列在心形中间
+                        const heartCenter = new THREE.Vector3(0, 0, 0);
+                        const gridCols = 4; // 从 6 改为 4，减少列数让照片更分散
+
+                        const photoIndex = obj.userData.id;
+                        const row = Math.floor(photoIndex / gridCols);
+                        const col = photoIndex % gridCols;
+                        // 计算在心形内部的网格位置
+                        const gridSize = CONFIG.heartSize * 30; // 从 0.6 改为 0.9，增大网格尺寸
+                        const x = (col - (gridCols - 1) / 2) * (gridSize / (gridCols - 0.3)); // 分母从 0.5 改为 0.3
+                        const z = (row - 2) * (gridSize / 3); // 分母从 4 改为 3
+                        // 心形边界检查 - 确保照片在心形内部
+                        const heartWidth = CONFIG.heartSize * 1.2;
+                        const heartHeight = CONFIG.heartSize * 1.5;
+                        if (Math.abs(x) < heartWidth * 0.8 && z > -heartHeight * 0.4 && z < heartHeight * 0.4) {
+                            targetPos.set(x, z * 0.5, -CONFIG.heartSize * 0.3 + z * 0.2);
+                            targetScaleMult = 1.8; // 照片在心形中适当放大
+                            obj.userData.isHeartPhoto = true;
+                        } else {
+                            // 不在心形内部的照片，移动到散开位置
+                            targetPos.copy(obj.userData.scatterPos);
+                            targetScaleMult = 1; // 缩小
+                            obj.userData.isHeartPhoto = false;
+                        }
+                        // 面向相机
+                        dummy.quaternion.copy(camera.quaternion);
+                        dummy.rotateY(Math.PI);
+                        targetRot.copy(dummy.quaternion);
+                    } else {
+                        // 非照片对象：移动到心形轮廓上
+                        // 【修复】确保 heartPos 存在
+                        const heartPos = obj.userData.heartPos ? obj.userData.heartPos.clone() : new THREE.Vector3(0, 0, 0);
+                        // 心形脉动动画
+                        heartPos.y += Math.sin(time * 2.0 + obj.userData.phase) * 2.0;
+                        heartPos.x *= 0.8 + Math.sin(time * 1.5 + obj.userData.phase * 0.5) * 0.1;
+                        heartPos.z = -CONFIG.heartSize * 0.5 + Math.sin(time * 1.3 + obj.userData.phase) * 3.0;
+                        targetPos.copy(heartPos);
+                        // 心形使用心形材质
+                        if (!obj.userData.isPhoto) {
+                            obj.material = matHeart;
+                        }
+                    }
+                }
+                else if (STATE.mode === 'TREE') {
+                    targetPos.copy(obj.userData.treePos);
+                    targetPos.y += Math.sin(time * 1.5 + obj.userData.phase) * 0.1;
+                    const treeRotation = time * 0.4;
+                    const x = targetPos.x * Math.cos(treeRotation) - targetPos.z * Math.sin(treeRotation);
+                    const z = targetPos.x * Math.sin(treeRotation) + targetPos.z * Math.cos(treeRotation);
+                    targetPos.x = x;
+                    targetPos.z = z;
+                    // 树模式下恢复原始材质
+                    if (!obj.userData.isPhoto && obj.material !== matGreen && obj.material !== matGold && obj.material !== matRed) {
+                        const rand = Math.random();
+                        if (rand < 0.65) obj.material = matGreen;
+                        else if (rand < 0.85) obj.material = matGold;
+                        else obj.material = matRed;
+                    }
+                }
+                else if (STATE.mode === 'SCATTER') {
+                    targetPos.copy(obj.userData.scatterPos);
+                    const ndcPos = targetPos.clone().project(camera);
+                    const distToCenter = Math.hypot(ndcPos.x, ndcPos.y);
+                    if (ndcPos.z < 1 && distToCenter < 0.8) {
+                        const pullStrength = Math.pow(1 - distToCenter, 2) * 25;
+                        const pullDir = camera.position.clone().sub(targetPos).normalize();
+                        targetPos.add(pullDir.multiplyScalar(pullStrength));
+                    }
+                    targetPos.y += Math.sin(time + obj.userData.phase) * 2;
+                    // 散开模式使用原始材质
+                    if (!obj.userData.isPhoto && obj.material !== matGreen && obj.material !== matGold && obj.material !== matRed) {
+                        const rand = Math.random();
+                        if (rand < 0.65) obj.material = matGreen;
+                        else if (rand < 0.85) obj.material = matGold;
+                        else obj.material = matRed;
+                    }
+                }
+                else if (STATE.mode === 'INSPECT') {
+                    if (obj.userData.id === STATE.activePhotoIndex && obj.userData.isPhoto) {
+                        targetPos.copy(camera.position).add(cameraForward.clone().multiplyScalar(40));
+                        targetScaleMult = 3.0;
+                    } else {
+                        targetPos.copy(obj.userData.scatterPos);
+                        targetScaleMult = 1.0;
+                    }
+                }
+                if (obj.userData.usingBasicMat &&
+                    (STATE.mode !== 'INSPECT' || obj.userData.id !== STATE.activePhotoIndex)) {
+                    if (obj.userData.originalMat) {
+                        obj.material = obj.userData.originalMat;
+                    }
+                    obj.userData.usingBasicMat = false;
+                }
+                obj.position.lerp(targetPos, 0.04);
+                dummy.position.copy(obj.position);
+                dummy.scale.set(1, 1, 1);
+                if (STATE.mode === 'TREE') {
+                    dummy.lookAt(0, obj.position.y, 0);
+                    if (obj.geometry.type === 'ExtrudeGeometry') {
+                        dummy.rotateY(time * 0.5);
+                    }
+                    obj.userData.targetQuaternion.copy(dummy.quaternion);
+                }
+                else if (STATE.mode === 'INSPECT' && obj.userData.id === STATE.activePhotoIndex && obj.userData.isPhoto) {
+                    dummy.quaternion.copy(camera.quaternion);
+                    dummy.rotateY(Math.PI);
+                    obj.userData.targetQuaternion.copy(dummy.quaternion);
+                }
+                else if (STATE.mode === 'HEART' && obj.userData.isPhoto) {
+                    // 心形中的照片面向相机
+                    dummy.quaternion.copy(camera.quaternion);
+                    dummy.rotateY(Math.PI);
+                    obj.userData.targetQuaternion.copy(dummy.quaternion);
+                }
+                else {
+                    const lookTarget = obj.position.clone().multiplyScalar(2);
+                    dummy.lookAt(lookTarget);
+                    obj.userData.targetQuaternion.copy(dummy.quaternion);
+                }
+                obj.quaternion.slerp(obj.userData.targetQuaternion, 0.1);
+                if (obj.userData.isPhoto && obj.userData.baseScale) {
+                    const targetVec = obj.userData.baseScale.clone().multiplyScalar(targetScaleMult);
+                    obj.scale.lerp(targetVec, 0.1);
+                } else {
+                    const s = lerp(obj.scale.x, targetScaleMult, 0.1);
+                    obj.scale.set(s, s, s);
+                }
+            });
+            // === 【轨迹球摄像机】 ===
+            // 【核心】应用平滑变焦
+            STATE.cameraRadius = lerp(STATE.cameraRadius, STATE.targetCameraRadius, 0.05);
+            const radius = STATE.cameraRadius;
+            if (STATE.mode === 'SCATTER' || STATE.mode === 'INSPECT' || STATE.mode === 'HEART') {
+                let targetRotX = 0.001;
+                let targetRotY = 0;
+                if (STATE.handDetected) {
+                    // 【反转手势】
+                    targetRotX = -STATE.handPosition.x * 0.008; // 左右: 手左球右
+                    // 【反转】垂直手势改为正向（手向上 -> rotY正 -> 球体向上转/相机向下移 -> 看底部）
+                    targetRotY = STATE.handPosition.y * 0.008;
+                }
+                const friction = STATE.handDetected ? 0.1 : 0.02;
+                STATE.rotVelX = lerp(STATE.rotVelX, targetRotX, friction);
+                STATE.rotVelY = lerp(STATE.rotVelY, targetRotY, friction);
+                const forward = camera.position.clone().normalize();
+                const tempUp = camera.up.clone().normalize();
+                const right = new THREE.Vector3().crossVectors(tempUp, forward).normalize();
+                const up = new THREE.Vector3().crossVectors(forward, right).normalize();
+                const qYaw = new THREE.Quaternion().setFromAxisAngle(up, -STATE.rotVelX);
+                const qPitch = new THREE.Quaternion().setFromAxisAngle(right, -STATE.rotVelY);
+                const qFinal = new THREE.Quaternion().multiplyQuaternions(qYaw, qPitch);
+                camera.position.applyQuaternion(qFinal);
+                camera.up.applyQuaternion(qFinal);
+                // 应用变焦后的位置
+                camera.position.setLength(radius);
+                camera.lookAt(0, 0, 0);
+            } else {
+                camera.position.lerp(new THREE.Vector3(0, 30, 160), 0.02);
+                const currentUp = camera.up.clone();
+                const targetUp = new THREE.Vector3(0, 1, 0);
+                camera.up.lerp(targetUp, 0.05);
+                camera.lookAt(0, 10, 0);
+                STATE.rotVelX = 0.001;
+                STATE.rotVelY = 0;
+                // 重置目标半径
+                STATE.targetCameraRadius = 200;
+            }
+        }
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            updatePhysics(time);
+            starSystem.update(time);
+            treeLightsSystem.update(time); // 彩灯
+            composer.render();
+        }
+        animate();
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>
