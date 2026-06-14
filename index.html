@@ -211,13 +211,93 @@
         }
 
         @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
 
-            100% {
-                transform: rotate(360deg);
-            }
+        /* 进度条样式 */
+        #progress-container {
+            width: 80%;
+            max-width: 600px;
+            margin-top: 30px;
+        }
+
+        #main-progress-wrapper { margin-bottom: 20px; }
+
+        #main-progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #ffd700;
+        }
+
+        #main-progress-bar {
+            width: 100%;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        #main-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #d4af37, #ffd700);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: #050810;
+        }
+
+        #sub-progress-list { max-height: 200px; overflow-y: auto; }
+
+        .sub-progress-item {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 215, 0, 0.2);
+        }
+
+        .sub-progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .sub-progress-name {
+            color: #aaddaa;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sub-progress-stats {
+            color: #88aaff;
+            font-size: 11px;
+            margin-left: 10px;
+        }
+
+        .sub-progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .sub-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.2s ease;
         }
 
         #input_video {
@@ -244,6 +324,18 @@
     <div id="loader">
         <div class="spinner"></div>
         <div>正在点亮圣诞树...<br><span style="font-size:12px; opacity:0.7">请允许摄像头权限以启用魔法手势</span></div>
+        <div id="progress-container">
+            <div id="main-progress-wrapper">
+                <div id="main-progress-label">
+                    <span>总体进度</span>
+                    <span id="main-progress-percent">0%</span>
+                </div>
+                <div id="main-progress-bar">
+                    <div id="main-progress-fill"></div>
+                </div>
+            </div>
+            <div id="sub-progress-list"></div>
+        </div>
     </div>
     <video id="input_video"></video>
     <canvas id="debug-cam"></canvas>
@@ -288,6 +380,104 @@
         import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // ================= 加载进度跟踪 =================
+        const FILE_SIZES = {
+            'hand_landmark_full.tflite': 5.5,
+            'hands_solution_packed_assets.data': 4.3,
+            'hands_solution_simd_wasm_bin.wasm': 6,
+            'default': 1
+        };
+
+        const progressTracker = {
+            files: {},
+            totalBytes: 0,
+            loadedBytes: 0,
+            startTime: Date.now(),
+
+            addFile(filename, sizeMB) {
+                this.files[filename] = {
+                    size: sizeMB * 1024 * 1024,
+                    loaded: 0,
+                    startTime: null,
+                    speed: 0,
+                    eta: 0
+                };
+                this.totalBytes += sizeMB * 1024 * 1024;
+            },
+
+            updateProgress(filename, loaded) {
+                const file = this.files[filename];
+                if (!file) return;
+
+                if (!file.startTime) {
+                    file.startTime = Date.now();
+                }
+
+                const elapsed = (Date.now() - file.startTime) / 1000;
+                const prevLoaded = file.loaded;
+                file.loaded = loaded;
+
+                if (elapsed > 0) {
+                    file.speed = loaded / elapsed / 1024; // KB/s
+                    const remaining = file.size - loaded;
+                    file.eta = file.speed > 0 ? remaining / 1024 / file.speed : 0;
+                }
+
+                this.loadedBytes = Object.values(this.files).reduce((sum, f) => sum + f.loaded, 0);
+                this.updateUI();
+            },
+
+            completeFile(filename) {
+                const file = this.files[filename];
+                if (file) {
+                    file.loaded = file.size;
+                    this.loadedBytes = Object.values(this.files).reduce((sum, f) => sum + f.loaded, 0);
+                    this.updateUI();
+                }
+            },
+
+            updateUI() {
+                const percent = this.totalBytes > 0 ? (this.loadedBytes / this.totalBytes * 100) : 0;
+                const mainFill = document.getElementById('main-progress-fill');
+                const mainPercent = document.getElementById('main-progress-percent');
+
+                if (mainFill) mainFill.style.width = percent + '%';
+                if (mainPercent) mainPercent.textContent = percent.toFixed(1) + '%';
+
+                // 更新子进度条
+                const subList = document.getElementById('sub-progress-list');
+                if (subList) {
+                    subList.innerHTML = '';
+                    Object.entries(this.files).forEach(([filename, file]) => {
+                        const filePercent = file.size > 0 ? (file.loaded / file.size * 100) : 0;
+                        const speedText = file.speed > 0 ? `${file.speed.toFixed(1)} KB/s` : '计算中...';
+                        const etaText = file.eta > 0 ? `${file.eta.toFixed(1)}s` : '--';
+
+                        const item = document.createElement('div');
+                        item.className = 'sub-progress-item';
+                        item.innerHTML = `
+                            <div class="sub-progress-header">
+                                <span class="sub-progress-name">${filename}</span>
+                                <span class="sub-progress-stats">${speedText} | ${etaText}</span>
+                            </div>
+                            <div class="sub-progress-bar">
+                                <div class="sub-progress-fill" style="width: ${filePercent}%"></div>
+                            </div>
+                        `;
+                        subList.appendChild(item);
+                    });
+                }
+            }
+        };
+
+        // 初始化已知文件
+        Object.entries(FILE_SIZES).forEach(([name, size]) => {
+            if (name !== 'default') {
+                progressTracker.addFile(name, size);
+            }
+        });
+
         // ================= 配置参数 =================
         const CONFIG = {
             colors: {
@@ -1009,6 +1199,76 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             });
             hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
             hands.onResults(onResults);
+
+            // 拦截 MediaPipe 文件加载
+            const originalFetch = window.fetch;
+            window.fetch = async function(...args) {
+                const url = args[0];
+                const filename = url.split('/').pop();
+
+                // 检查是否是已知的模型文件
+                if (FILE_SIZES[filename]) {
+                    const response = await originalFetch.apply(this, args);
+                    const contentLength = response.headers.get('content-length');
+                    const total = contentLength ? parseInt(contentLength) : FILE_SIZES[filename] * 1024 * 1024;
+
+                    const reader = response.body.getReader();
+                    let loaded = 0;
+
+                    const stream = new ReadableStream({
+                        async start(controller) {
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                loaded += value.length;
+                                progressTracker.updateProgress(filename, loaded);
+                                controller.enqueue(value);
+                            }
+                            controller.close();
+                            progressTracker.completeFile(filename);
+                        }
+                    });
+
+                    return new Response(stream, {
+                        headers: response.headers,
+                        status: response.status,
+                        statusText: response.statusText
+                    });
+                }
+
+                return originalFetch.apply(this, args);
+            };
+
+            // 拦截 XMLHttpRequest 以捕获 .data 文件
+            const originalXHROpen = XMLHttpRequest.prototype.open;
+            const originalXHRSend = XMLHttpRequest.prototype.send;
+
+            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                this._trackedUrl = url;
+                this._trackedFilename = url.split('/').pop();
+                return originalXHROpen.apply(this, [method, url, ...rest]);
+            };
+
+            XMLHttpRequest.prototype.send = function(body) {
+                const xhr = this;
+                const filename = xhr._trackedFilename;
+
+                if (FILE_SIZES[filename]) {
+                    // 添加进度监听
+                    xhr.addEventListener('progress', (e) => {
+                        if (e.lengthComputable) {
+                            progressTracker.updateProgress(filename, e.loaded);
+                        }
+                    });
+
+                    xhr.addEventListener('load', () => {
+                        progressTracker.completeFile(filename);
+                    });
+                }
+
+                return originalXHRSend.apply(this, [body]);
+            };
+
             if (window.Camera) {
                 const cameraUtils = new window.Camera(videoElement, { onFrame: async () => { await hands.send({ image: videoElement }); }, width: 320, height: 240 });
                 cameraUtils.start();
