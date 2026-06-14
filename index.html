@@ -1387,7 +1387,8 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     return `models/${file}`;
                 }
             });
-            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            const isMobile = /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, useCpuInference: isMobile });
             hands.onResults(onResults);
 
             // 拦截 MediaPipe 文件加载
