@@ -46,7 +46,7 @@
         .hud-text {
             position: absolute;
             top: 20px;
-            left: 20px;
+            left: 0;
             color: rgba(255, 230, 100, 0.9);
             text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
             font-size: 13px;
@@ -56,6 +56,41 @@
             border-left: 2px solid rgba(255, 215, 0, 0.6);
             border-radius: 0 10px 10px 0;
             backdrop-filter: blur(4px);
+            pointer-events: auto;
+            cursor: pointer;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .hud-text.expanded {
+            transform: translateX(0);
+            z-index: 16;
+        }
+
+        .hud-toggle {
+            position: absolute;
+            top: 20px;
+            left: 5px;
+            width: 30px;
+            height: 30px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid rgba(255, 215, 0, 0.6);
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 215, 0, 0.9);
+            font-size: 16px;
+            pointer-events: auto;
+            z-index: 15;
+            backdrop-filter: blur(4px);
+            transition: transform 0.3s ease;
+            will-change: transform;
+        }
+
+        .hud-toggle.slide-right {
+            transform: translateX(240px);
             pointer-events: none;
         }
 
@@ -67,6 +102,21 @@
 
         .hud-text p {
             margin: 5px 0;
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 10px;
+            right: 5px;
+            color: rgba(0, 255, 255, 0.8);
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.4);
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px 8px;
+            border-radius: 3px;
+            backdrop-filter: blur(3px);
+            pointer-events: none;
         }
 
         /* Gemini 魔法祝福按钮区域 */
@@ -131,30 +181,7 @@
             font-family: "Georgia", serif;
         }
 
-        #status-bar-container {
-            position: absolute;
-            bottom: 30px;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            pointer-events: none;
-        }
 
-        #status-bar {
-            text-align: center;
-            font-size: 16px;
-            font-weight: bold;
-            color: #fff;
-            background: rgba(20, 80, 40, 0.7);
-            padding: 10px 40px;
-            border-radius: 50px;
-            border: 1px solid rgba(255, 215, 0, 0.4);
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
 
         #upload-container {
             position: absolute;
@@ -312,7 +339,7 @@
             height: 90px;
             background: #000;
             border: 1px solid #333;
-            opacity: 0.3;
+            opacity: 0.8;
             z-index: 5;
             transform: scaleX(-1);
             border-radius: 5px;
@@ -334,6 +361,10 @@
                 max-width: 180px;
             }
 
+            .hud-toggle.slide-right {
+                transform: translateX(200px);
+            }
+
             .hud-text h3 {
                 font-size: 13px;
                 margin-bottom: 5px;
@@ -344,16 +375,6 @@
                 line-height: 1.4;
             }
 
-            /* 状态栏 - 移动端居中 */
-            #status-bar-container {
-                bottom: 15px;
-            }
-
-            #status-bar {
-                font-size: 12px;
-                padding: 8px 20px;
-                letter-spacing: 1px;
-            }
 
             /* 上传按钮 - 移动端右下角 */
             #upload-container {
@@ -456,12 +477,7 @@
                 font-size: 11px;
             }
 
-            #status-bar {
-                font-size: 10px;
-                padding: 6px 15px;
-            }
-
-            #upload-btn {
+#upload-btn {
                 padding: 8px 12px;
                 font-size: 10px;
             }
@@ -498,10 +514,6 @@
                 height: 52px;
             }
 
-            #status-bar-container {
-                bottom: 10px;
-            }
-
             #upload-container {
                 bottom: 10px;
                 right: 10px;
@@ -531,7 +543,8 @@
     <canvas id="debug-cam"></canvas>
     <div id="canvas-container"></div>
     <div id="ui-layer">
-        <div class="hud-text">
+        <div class="hud-toggle" id="hud-toggle">☰</div>
+        <div class="hud-text" id="hud-text">
             <h3>魔法手势指南</h3>
             <p>✊ <b>握拳</b>: 呼唤圣诞树</p>
             <p>✌️ <b>V字手势</b>: 变成爱心</p>
@@ -539,6 +552,7 @@
             <p>🤏 <b>捏合</b>: 拾取正面照片</p>
             <p>👋 <b>移动</b>: 旋转球体视角</p>
         </div>
+        <div id="fps-counter">FPS: 0</div>
         <!-- Gemini 祝福 UI -->
         <!-- <div id="magic-ui">
 <button id="blessing-btn" onclick="generateBlessing()">
@@ -547,9 +561,6 @@
 </div> -->
         <div id="blessing-overlay">
             <div id="blessing-content"></div>
-        </div>
-        <div id="status-bar-container">
-            <div id="status-bar">等待手势指令...</div>
         </div>
         <div id="upload-container">
             <input type="file" id="file-input" accept="image/*" multiple style="display:none;">
@@ -1315,7 +1326,6 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
         const videoElement = document.getElementById('input_video');
         const debugCanvas = document.getElementById('debug-cam');
         const debugCtx = debugCanvas.getContext('2d');
-        const statusDiv = document.getElementById('status-bar');
         function onResults(results) {
             const loader = document.getElementById('loader');
             if (loader.style.display !== 'none') {
@@ -1371,8 +1381,6 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     STATE.lastModeTime = now;
                     // 【优化】心形模式使用更近的摄像机距离
                     STATE.targetCameraRadius = 120;
-                    statusDiv.innerText = "❤️ 状态: 爱心模式";
-                    statusDiv.style.backgroundColor = "rgba(255, 50, 100, 0.8)";
                 }
                 // 其他手势检测
                 else if (pinchDist < 0.05 && extendedCount >= 1 && STATE.mode !== 'INSPECT' && (now - STATE.lastModeTime > 1000)) {
@@ -1394,16 +1402,10 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     if (closestPhoto) {
                         STATE.activePhotoIndex = closestPhoto.userData.id;
                     }
-                    statusDiv.innerText = "🔍 状态: 浏览回忆";
-                    statusDiv.style.backgroundColor = "rgba(180, 50, 50, 0.8)";
                 } else if (extendedCount >= 4 && STATE.mode !== 'SCATTER' && pinchDist > 0.1) {
                     STATE.mode = 'SCATTER';
-                    statusDiv.innerText = "✨ 状态: 星空漫游";
-                    statusDiv.style.backgroundColor = "rgba(220, 180, 0, 0.8)";
                 } else if (extendedCount === 0 && STATE.mode !== 'TREE' && pinchDist > 0.1) {
                     STATE.mode = 'TREE';
-                    statusDiv.innerText = "🎄 状态: 圣诞树";
-                    statusDiv.style.backgroundColor = "rgba(20, 80, 40, 0.8)";
                     // 退出心形模式时重置照片状态
                     if (STATE.mode === 'TREE') {
                         objects.forEach(obj => {
@@ -1418,8 +1420,6 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 STATE.handDetected = false;
                 // 【核心】无手势时，自动退回到最远距离
                 STATE.targetCameraRadius = 200;
-                statusDiv.innerText = "等待手势...";
-                statusDiv.style.backgroundColor = "rgba(0,0,0,0.4)";
             }
             debugCtx.restore();
         }
@@ -2048,15 +2048,60 @@ gl_FragColor = vec4(vColor, alpha);
             }
         }
         const clock = new THREE.Clock();
-        function animate() {
+        const targetFPS = 120;
+        const frameInterval = 1000 / targetFPS;
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let lastFPSUpdateTime = 0;
+        let fps = 0;
+        const fpsCounter = document.getElementById('fps-counter');
+
+        function animate(currentTime) {
             requestAnimationFrame(animate);
-            const time = clock.getElapsedTime();
-            updatePhysics(time);
-            starSystem.update(time);
-            treeLightsSystem.update(time); // 彩灯
-            composer.render();
+
+            const deltaTime = currentTime - lastFrameTime;
+
+            if (deltaTime >= frameInterval) {
+                lastFrameTime = currentTime - (deltaTime % frameInterval);
+                frameCount++;
+
+                const time = clock.getElapsedTime();
+                updatePhysics(time);
+                starSystem.update(time);
+                treeLightsSystem.update(time); // 彩灯
+                composer.render();
+
+                // Update FPS display every 500ms
+                if (currentTime - lastFPSUpdateTime >= 500) {
+                    fps = Math.round(1000 / deltaTime);
+                    lastFPSUpdateTime = currentTime;
+                    fpsCounter.textContent = `FPS: ${fps}`;
+                }
+            }
         }
-        animate();
+        animate(0);
+
+        // HUD toggle functionality
+        const hudToggle = document.getElementById('hud-toggle');
+        const hudText = document.getElementById('hud-text');
+        let hudExpanded = false;
+
+        function toggleHUD() {
+            hudExpanded = !hudExpanded;
+            if (hudExpanded) {
+                hudText.classList.add('expanded');
+                hudToggle.classList.add('slide-right');
+                hudToggle.textContent = '✕';
+            } else {
+                hudText.classList.remove('expanded');
+                hudToggle.classList.remove('slide-right');
+                hudToggle.textContent = '☰';
+            }
+        }
+
+        hudToggle.addEventListener('click', toggleHUD);
+        hudText.addEventListener('click', toggleHUD);
+
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
