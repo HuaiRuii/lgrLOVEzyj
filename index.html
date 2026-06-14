@@ -1001,16 +1001,10 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             const hands = new window.Hands({
                 locateFile: (file) => {
                     console.log('🔍 Locating file:', file);
-
-                    if (file === 'hands_solution_simd_wasm_bin.wasm' || file === 'hands_solution_packed_assets.data') {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    if (file.endsWith('.js')) {
+                        return `js/${file}`;
                     }
-                    // if (file === 'js/hands_solution_simd_wasm_bin.js') {
-                    //     return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js`;
-                    // }
-
-                    return `${file}`;
-
+                    return `models/${file}`;
                 }
             });
             hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
