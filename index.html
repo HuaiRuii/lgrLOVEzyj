@@ -6,12 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gesture Controlled Christmas Tree with Gemini</title>
     <!-- MediaPipe 依赖库 -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
-        crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
-        crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="js/mediapipe_camera_utils.js" crossorigin="anonymous"></script>
+    <script src="js/mediapipe_control_utils.js" crossorigin="anonymous"></script>
+    <script src="js/mediapipe_drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="js/mediapipe_hands.js" crossorigin="anonymous"></script>
     <style>
         body {
             margin: 0;
@@ -278,10 +276,10 @@
     </div>
     <script type="importmap">
 {
-"imports": {
-"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-}
+  "imports": {
+    "three": "./js/three.module.js",
+    "three/addons/": "./js/addons/"
+  }
 }
 </script>
     <script type="module">
@@ -1000,7 +998,21 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             debugCtx.restore();
         }
         if (window.Hands) {
-            const hands = new window.Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+            const hands = new window.Hands({
+                locateFile: (file) => {
+                    console.log('🔍 Locating file:', file);
+
+                    if (file === 'hands_solution_simd_wasm_bin.wasm' || file === 'hands_solution_packed_assets.data') {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    }
+                    // if (file === 'js/hands_solution_simd_wasm_bin.js') {
+                    //     return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js`;
+                    // }
+
+                    return `${file}`;
+
+                }
+            });
             hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
             hands.onResults(onResults);
             if (window.Camera) {
