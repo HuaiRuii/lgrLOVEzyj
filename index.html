@@ -808,6 +808,132 @@
             texture.repeat.set(4, 4); // 重复贴图
             return texture;
         }
+        // ================= 实体圣诞树：分层圆锥树叶 + 树干 =================
+        const TREE_LAYERS = [
+            { yBottom: 16, yTop: 32.5, rBottom: 12, rTop: 0 },   // 顶层
+            { yBottom: 0, yTop: 18, rBottom: 20, rTop: 5 },      // 上层
+            { yBottom: -16, yTop: 2, rBottom: 26, rTop: 10 },    // 中层
+            { yBottom: -32.5, yTop: -14, rBottom: 28, rTop: 16 } // 底层
+        ];
+
+        function getTreeLayerRadius(y) {
+            for (const layer of TREE_LAYERS) {
+                if (y <= layer.yTop && y >= layer.yBottom) {
+                    const t = (y - layer.yBottom) / (layer.yTop - layer.yBottom);
+                    return layer.rBottom + (layer.rTop - layer.rBottom) * t;
+                }
+            }
+            if (y > TREE_LAYERS[0].yTop) return TREE_LAYERS[0].rTop;
+            return TREE_LAYERS[TREE_LAYERS.length - 1].rBottom;
+        }
+
+        function getTreeSurfacePosition(hNorm, angle, offset = 0) {
+            const y = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2);
+            const radius = getTreeLayerRadius(y) + offset;
+            return new THREE.Vector3(
+                Math.cos(angle) * radius,
+                y,
+                Math.sin(angle) * radius
+            );
+        }
+
+        const treeGroup = new THREE.Group();
+        scene.add(treeGroup);
+
+        function createTrunk() {
+            const trunkGeo = new THREE.CylinderGeometry(2.5, 3.5, 24, 16);
+            const trunkMat = new THREE.MeshStandardMaterial({
+                color: 0x4a2c17,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.set(0, -22, 0);
+            treeGroup.add(trunk);
+        }
+
+        function createTreeBranches() {
+            const branchMat = new THREE.MeshStandardMaterial({
+                color: 0x1a5e32,
+                roughness: 0.7,
+                metalness: 0.1,
+                emissive: 0x0f4a22,
+                emissiveIntensity: 0.3
+            });
+            TREE_LAYERS.forEach((layer) => {
+                const height = layer.yTop - layer.yBottom;
+                const coneGeo = new THREE.ConeGeometry(layer.rBottom * 1.08, height, 32, 1, false);
+                const cone = new THREE.Mesh(coneGeo, branchMat);
+                cone.position.set(0, layer.yBottom + height / 2, 0);
+                treeGroup.add(cone);
+            });
+        }
+
+        createTrunk();
+        // createTreeBranches(); // 已替换为粒子树枝系统
+        // ================= 粒子树枝系统（替代实体圆锥）====================
+        function createBranchParticles() {
+            const particleCount = 1600;
+            const branchGeo = new THREE.ConeGeometry(0.22, 1.0, 4);
+            const branchMat = new THREE.MeshStandardMaterial({
+                color: 0x267a3c,
+                roughness: 0.85,
+                metalness: 0.05,
+                emissive: 0x0f4a22,
+                emissiveIntensity: 0.15
+            });
+            const branches = new THREE.InstancedMesh(branchGeo, branchMat, particleCount);
+            branches.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            scene.add(branches);
+
+            const branchData = [];
+            const branchTempObj = new THREE.Object3D();
+            const layers = 8;
+            const branchesPerLayer = 16;
+            const particlesPerBranch = Math.floor(particleCount / (layers * branchesPerLayer));
+            let idx = 0;
+
+            for (let l = 0; l < layers; l++) {
+                const hNorm = 0.08 + (l / (layers - 1)) * 0.82;
+                const y = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2);
+                const baseRadius = getTreeLayerRadius(y) * 0.85;
+
+                for (let b = 0; b < branchesPerLayer; b++) {
+                    const branchAngle = (b / branchesPerLayer) * Math.PI * 2 + l * 0.35;
+                    const branchLength = baseRadius * (0.75 + Math.random() * 0.35);
+                    const droop = 0.25 + Math.random() * 0.25;
+
+                    for (let p = 0; p < particlesPerBranch; p++) {
+                        if (idx >= particleCount) break;
+                        const t = p / (particlesPerBranch - 1 || 1);
+                        const r = t * branchLength;
+                        const x = Math.cos(branchAngle) * r;
+                        const z = Math.sin(branchAngle) * r;
+                        const py = y - Math.sin(t * Math.PI) * branchLength * droop;
+
+                        branchData.push({
+                            basePos: new THREE.Vector3(x, py, z),
+                            angle: branchAngle,
+                            baseY: y,
+                            t: t,
+                            phase: Math.random() * Math.PI * 2,
+                            scale: 0.7 + Math.random() * 0.8,
+                            rot: new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI)
+                        });
+
+                        branchTempObj.position.set(x, py, z);
+                        branchTempObj.rotation.copy(branchData[idx].rot);
+                        branchTempObj.scale.setScalar(branchData[idx].scale);
+                        branchTempObj.updateMatrix();
+                        branches.setMatrixAt(idx, branchTempObj.matrix);
+                        idx++;
+                    }
+                }
+            }
+            branches.instanceMatrix.needsUpdate = true;
+            return { mesh: branches, data: branchData };
+        }
+        const branchSystem = createBranchParticles();
         // 【核心】照片材质：强制哑光 (Roughness 1.0)
         const matPhotoBase = new THREE.MeshStandardMaterial({
             side: THREE.DoubleSide,
@@ -981,16 +1107,10 @@
                 // === 树上位置（只对前500个彩灯计算完美的树形分布）===
                 let treePos;
                 if (i < baseLightCount) {
-                    // 基于500个彩灯均匀分布在整棵树上
+                    // 基于500个彩灯均匀分布在分层圆锥树叶上
                     const hNorm = i / baseLightCount;
-                    const treeY = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2) + 5;
-                    const treeRadius = Math.pow((1 - hNorm), 0.9) * CONFIG.treeRadius * 1.1;
                     const treeAngle = i * 0.8 + Math.sin(i * 0.3) * 0.5;
-                    treePos = new THREE.Vector3(
-                        Math.cos(treeAngle) * treeRadius,
-                        treeY,
-                        Math.sin(treeAngle) * treeRadius
-                    );
+                    treePos = getTreeSurfacePosition(hNorm, treeAngle, 0.8);
                 } else {
                     // 后4500个彩灯在树上的位置设为(0,0,0)，因为它们在TREE模式下不可见
                     treePos = new THREE.Vector3(0, 0, 0);
@@ -1209,17 +1329,12 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             const mesh = new THREE.Mesh(geo, mat);
             const baseScale = new THREE.Vector3(6, 6.5, 1);
             mesh.scale.copy(baseScale);
-            // 照片分布：使用随机分布，避免顶部汇聚
+            // 照片分布：挂在分层圆锥树叶边缘
             const seed = index * 13;
             const rand = (Math.sin(seed) + 1) / 2;
-            const lambda = 1.1;
-            const hNorm = 1 - Math.exp(-lambda * rand);
-            const angle = (Math.sin(seed * 789) + 1) * Math.PI;
-            const y = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2);
-            const radius = Math.pow((1 - hNorm), 0.9) * CONFIG.treeRadius;
-            const treePos = new THREE.Vector3(
-                Math.cos(angle * 10) * radius, y, Math.sin(angle * 10) * radius
-            );
+            const hNorm = 0.15 + rand * 0.75; // 避免太顶和太底
+            const angle = (Math.sin(seed * 789) + 1) * Math.PI + index * 0.5;
+            const treePos = getTreeSurfacePosition(hNorm, angle, 1.2);
             const scatterRadius = 70 + Math.random() * 30;
             const phi = Math.acos(-1 + (2 * Math.random()));
             const theta = Math.sqrt(Math.PI * (CONFIG.particleCount + CONFIG.photoCount)) * phi;
@@ -1243,7 +1358,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 isHeartPhoto: false
             };
             mesh.position.copy(treePos);
-            mesh.lookAt(0, y, 0);
+            mesh.lookAt(0, treePos.y, 0);
             scene.add(mesh);
             objects.push(mesh);
         }
@@ -1258,11 +1373,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             else { type = 'red'; instanceIdx = _rIdx++; }
             const hNorm = (i + CONFIG.photoCount) / (CONFIG.particleCount + CONFIG.photoCount);
             const angle = i * 0.5;
-            const y = (hNorm * CONFIG.treeHeight) - (CONFIG.treeHeight / 2);
-            const radius = Math.pow((1 - hNorm), 0.9) * CONFIG.treeRadius;
-            const treePos = new THREE.Vector3(
-                Math.cos(angle * 10) * radius, y, Math.sin(angle * 10) * radius
-            );
+            const treePos = getTreeSurfacePosition(hNorm, angle, 0.5);
             const scatterRadius = 70 + Math.random() * 30;
             const phi = Math.acos(-1 + (2 * Math.random()));
             const theta = Math.sqrt(Math.PI * (CONFIG.particleCount + CONFIG.photoCount)) * phi;
@@ -1798,6 +1909,40 @@ gl_FragColor = vec4(vColor, alpha);
         const _targetUp = new THREE.Vector3(0, 1, 0);
         function updatePhysics(time) {
             _camForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+            // 控制实体树干和树叶的显示与旋转
+            if (treeGroup) {
+                const isTreeMode = STATE.mode === 'TREE';
+                treeGroup.visible = isTreeMode;
+                if (isTreeMode) {
+                    treeGroup.rotation.y = time * 0.4;
+                }
+            }
+            // 更新粒子树枝
+            if (branchSystem) {
+                const isTreeMode = STATE.mode === 'TREE';
+                branchSystem.mesh.visible = isTreeMode;
+                if (isTreeMode) {
+                    const treeRotation = time * 0.4;
+                    const cosR = Math.cos(treeRotation);
+                    const sinR = Math.sin(treeRotation);
+                    for (let i = 0; i < branchSystem.data.length; i++) {
+                        const b = branchSystem.data[i];
+                        const bx = b.basePos.x * cosR - b.basePos.z * sinR;
+                        const bz = b.basePos.x * sinR + b.basePos.z * cosR;
+                        const sway = Math.sin(time * 1.5 + b.phase) * 0.12;
+                        _tempObj.position.set(bx + sway, b.basePos.y, bz + sway * 0.5);
+                        _tempObj.rotation.set(
+                            b.rot.x + Math.sin(time * 0.8 + b.phase) * 0.04,
+                            b.rot.y + treeRotation,
+                            b.rot.z
+                        );
+                        _tempObj.scale.setScalar(b.scale);
+                        _tempObj.updateMatrix();
+                        branchSystem.mesh.setMatrixAt(i, _tempObj.matrix);
+                    }
+                    branchSystem.mesh.instanceMatrix.needsUpdate = true;
+                }
+            }
             // 【动态灯光控制】
             let targetLightY_Point, targetLightY_Rim, targetLightY_Front;
             let targetIntensity_Point, targetIntensity_Front, targetIntensity_Ambient;
