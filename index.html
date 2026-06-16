@@ -800,7 +800,9 @@
             treeRadius: 28,
             heartSize: 4,
             // 树形与心形切换时的爆炸半径（比心和树都大）
-            explodeRadius: 60
+            explodeRadius: 60,
+            // 心形模式下照片向内聚拢程度（1.0=不聚拢，0.5=聚拢到中心一半，越小越聚拢）
+            heartPhotoGather: 1.1
         };
         let gestureEnabled = true;
         let cameraUtils = null;
@@ -1483,11 +1485,15 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             }
             particleData.forEach(p => {
                 p.explodeStartPos = p.currentPos.clone();
-                p.explodeDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                let dx = Math.random() - 0.5, dy = Math.random() - 0.5, dz = Math.random() - 0.5;
+                while (dx === 0 && dy === 0 && dz === 0) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; }
+                p.explodeDir = new THREE.Vector3(dx, dy, dz).normalize();
             });
             objects.forEach(obj => {
                 obj.userData.explodeStartPos = obj.position.clone();
-                obj.userData.explodeDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                let dx = Math.random() - 0.5, dy = Math.random() - 0.5, dz = Math.random() - 0.5;
+                while (dx === 0 && dy === 0 && dz === 0) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; }
+                obj.userData.explodeDir = new THREE.Vector3(dx, dy, dz).normalize();
             });
         }
         function createPhotoObject(index) {
@@ -1508,7 +1514,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             const phi = Math.acos(-1 + (2 * Math.random()));
             const theta = Math.sqrt(Math.PI * (CONFIG.particleCount + CONFIG.photoCount)) * phi;
             const scatterPos = new THREE.Vector3().setFromSphericalCoords(scatterRadius, phi, theta);
-            const heartT = index / (CONFIG.particleCount + CONFIG.photoCount + 1);
+            const heartT = index / CONFIG.photoCount;
             const heartAngle = heartT * Math.PI * 2;
             const heartX = CONFIG.heartSize * 16 * Math.pow(Math.sin(heartAngle), 3);
             const heartY = CONFIG.heartSize * (13 * Math.cos(heartAngle) - 5 * Math.cos(2 * heartAngle) - 2 * Math.cos(3 * heartAngle) - Math.cos(4 * heartAngle));
@@ -1534,12 +1540,23 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
         for (let i = 0; i < CONFIG.photoCount; i++) createPhotoObject(i);
 
         // 初始化粒子到 InstancedMesh（替代独立Mesh，draw call 从2000降到3）
+        // 【修复】使用确定性分配，确保每种类型的粒子数量与预分配的 InstancedMesh 实例数完全匹配
+        const typeArray = [];
+        for (let i = 0; i < greenCount; i++) typeArray.push('green');
+        for (let i = 0; i < goldCount; i++) typeArray.push('gold');
+        for (let i = 0; i < redCount; i++) typeArray.push('red');
+        // Fisher-Yates 洗牌算法打乱顺序
+        for (let i = typeArray.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [typeArray[i], typeArray[j]] = [typeArray[j], typeArray[i]];
+        }
+
         for (let i = 0; i < CONFIG.particleCount; i++) {
-            const rand = Math.random();
-            let type, instanceIdx;
-            if (rand < 0.65) { type = 'green'; instanceIdx = _gIdx++; }
-            else if (rand < 0.85) { type = 'gold'; instanceIdx = _goIdx++; }
-            else { type = 'red'; instanceIdx = _rIdx++; }
+            const type = typeArray[i];
+            let instanceIdx;
+            if (type === 'green') instanceIdx = _gIdx++;
+            else if (type === 'gold') instanceIdx = _goIdx++;
+            else instanceIdx = _rIdx++;
             const hNorm = (i + CONFIG.photoCount) / (CONFIG.particleCount + CONFIG.photoCount);
             const angle = i * 0.5;
             const treePos = getTreeSurfacePosition(hNorm, angle, 0.5);
@@ -2184,11 +2201,11 @@ gl_FragColor = vec4(vColor, alpha);
                 targetLightY_Point = 30;
                 targetLightY_Rim = 40;
                 targetLightY_Front = 20;
-                // 心形脉动灯光效果
-                const heartPulse = 0.5 + 0.5 * Math.sin(time * 2.0);
+                // 心形脉动灯光效果（保持较高基础亮度，轻微脉动不刺眼）
+                const heartPulse = 1.5 + 0.15 * Math.sin(time * 2.0);
                 targetIntensity_Point = 10.0 * heartPulse;
-                targetIntensity_Front = 4.0 * heartPulse;
-                targetIntensity_Ambient = 3.0 * heartPulse;
+                targetIntensity_Front = 4.5 * heartPulse;
+                targetIntensity_Ambient = 3.5 * heartPulse;
             } else {
                 // SCATTER
                 targetLightY_Point = 40;
@@ -2226,24 +2243,12 @@ gl_FragColor = vec4(vColor, alpha);
                     obj.userData.targetQuaternion.copy(dummy.quaternion);
                 } else if (STATE.mode === 'HEART') {
                     if (obj.userData.isPhoto) {
-                        const gridCols = 4;
-                        const photoIndex = obj.userData.id;
-                        const row = Math.floor(photoIndex / gridCols);
-                        const col = photoIndex % gridCols;
-                        const gridSize = CONFIG.heartSize * 30;
-                        const x = (col - (gridCols - 1) / 2) * (gridSize / (gridCols - 0.3));
-                        const z = (row - 2) * (gridSize / 3);
-                        const heartWidth = CONFIG.heartSize * 1.2;
-                        const heartHeight = CONFIG.heartSize * 1.5;
-                        if (Math.abs(x) < heartWidth * 0.8 && z > -heartHeight * 0.4 && z < heartHeight * 0.4) {
-                            _targetPos.set(x, z * 0.5, -CONFIG.heartSize * 0.3 + z * 0.2);
-                            targetScaleMult = 1.8;
-                            obj.userData.isHeartPhoto = true;
-                        } else {
-                            _targetPos.copy(obj.userData.scatterPos);
-                            targetScaleMult = 1;
-                            obj.userData.isHeartPhoto = false;
-                        }
+                        _targetPos.copy(obj.userData.heartPos);
+                        _targetPos.x *= CONFIG.heartPhotoGather;
+                        _targetPos.y *= CONFIG.heartPhotoGather;
+                        _targetPos.z = -CONFIG.heartSize * 0.5 + Math.sin(time * 1.3 + obj.userData.phase) * 3.0;
+                        targetScaleMult = 1.8;
+                        obj.userData.isHeartPhoto = true;
                         dummy.quaternion.copy(camera.quaternion);
                         dummy.rotateY(Math.PI);
                         obj.userData.targetQuaternion.copy(dummy.quaternion);
@@ -2325,7 +2330,10 @@ gl_FragColor = vec4(vColor, alpha);
                 let targetScaleMult = 1.0;
                 if (STATE.isExploding) {
                     const startPos = p.explodeStartPos || p.currentPos;
-                    const dir = p.explodeDir || _explodeDir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                    let dir = p.explodeDir;
+                    if (!dir || !isFinite(dir.x) || !isFinite(dir.y) || !isFinite(dir.z) || dir.lengthSq() < 0.0001) {
+                        dir = _explodeDir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                    }
                     const eased = 1 - Math.pow(1 - STATE.explodeProgress, 3);
                     _targetPos.copy(startPos).add(dir.clone().multiplyScalar(CONFIG.explodeRadius * eased));
                 } else if (isHeartMode) {
@@ -2355,6 +2363,9 @@ gl_FragColor = vec4(vColor, alpha);
                     _targetPos.y += Math.sin(time + p.phase) * 2;
                 }
                 p.currentPos.lerp(_targetPos, 0.04);
+                if (!isFinite(p.currentPos.x) || !isFinite(p.currentPos.y) || !isFinite(p.currentPos.z) || p.currentPos.lengthSq() < 0.01) {
+                    p.currentPos.copy(p.scatterPos);
+                }
                 _tempObj.position.copy(p.currentPos);
                 if (STATE.mode === 'TREE') {
                     _tempObj.lookAt(0, p.currentPos.y, 0);
@@ -2510,6 +2521,98 @@ gl_FragColor = vec4(vColor, alpha);
                 debugCanvas.style.display = 'none';
                 STATE.handDetected = false;
                 STATE.targetCameraRadius = 200;
+            }
+        });
+
+        // ================= 点击检测：输出球/正方体信息 =================
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        renderer.domElement.addEventListener('click', (event) => {
+            // 计算鼠标在标准化设备坐标中的位置
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // 检测与三个InstancedMesh的相交
+            const intersects = raycaster.intersectObjects([instancedGreen, instancedGold, instancedRed]);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                const mesh = hit.object;
+                const instanceId = hit.instanceId;
+
+                console.log('========== 点击到粒子 ==========');
+                console.log('Mesh类型:', mesh === instancedGreen ? '绿色球体' : mesh === instancedGold ? '金色球体' : '红色正方体');
+                console.log('实例ID (instanceId):', instanceId);
+                console.log('总实例数:', mesh.count);
+                console.log('交点位置 (世界坐标):', hit.point);
+                console.log('交点面索引:', hit.faceIndex);
+
+                // 获取该实例的变换矩阵
+                const matrix = new THREE.Matrix4();
+                mesh.getMatrixAt(instanceId, matrix);
+
+                // 从矩阵中提取位置、旋转、缩放
+                const position = new THREE.Vector3();
+                const quaternion = new THREE.Quaternion();
+                const scale = new THREE.Vector3();
+                matrix.decompose(position, quaternion, scale);
+
+                console.log('---------- 粒子变换信息 ----------');
+                console.log('当前位置 (position):', position.clone());
+                console.log('当前缩放 (scale):', scale.clone());
+                console.log('当前旋转 (quaternion):', quaternion.clone());
+
+                // 在particleData中查找对应的数据
+                let particleInfo = null;
+                for (let i = 0; i < particleData.length; i++) {
+                    const p = particleData[i];
+                    if ((p.type === 'green' && mesh === instancedGreen && p.instanceIdx === instanceId) ||
+                        (p.type === 'gold' && mesh === instancedGold && p.instanceIdx === instanceId) ||
+                        (p.type === 'red' && mesh === instancedRed && p.instanceIdx === instanceId)) {
+                        particleInfo = p;
+                        break;
+                    }
+                }
+
+                if (particleInfo) {
+                    console.log('---------- particleData 数据 ----------');
+                    console.log('粒子类型:', particleInfo.type);
+                    console.log('instanceIdx:', particleInfo.instanceIdx);
+                    console.log('树形目标位置 (treePos):', particleInfo.treePos?.clone());
+                    console.log('散开目标位置 (scatterPos):', particleInfo.scatterPos?.clone());
+                    console.log('心形目标位置 (heartPos):', particleInfo.heartPos?.clone());
+                    console.log('当前存储位置 (currentPos):', particleInfo.currentPos?.clone());
+                    console.log('当前缩放 (currentScale):', particleInfo.currentScale);
+                    console.log('相位 (phase):', particleInfo.phase);
+                } else {
+                    console.log('警告: 未在particleData中找到对应数据！');
+                }
+
+                console.log('====================================');
+                console.log('\n提示: 如果position接近(0,0,0)，说明该粒子没有被正确移动！');
+
+                // 高亮显示被点击的粒子（临时放大）
+                const originalScale = scale.clone();
+                const newScale = scale.clone().multiplyScalar(2.0);
+                _tempObj.position.copy(position);
+                _tempObj.quaternion.copy(quaternion);
+                _tempObj.scale.copy(newScale);
+                _tempObj.updateMatrix();
+                mesh.setMatrixAt(instanceId, _tempObj.matrix);
+                mesh.instanceMatrix.needsUpdate = true;
+
+                // 500ms后恢复原始大小
+                setTimeout(() => {
+                    _tempObj.position.copy(position);
+                    _tempObj.quaternion.copy(quaternion);
+                    _tempObj.scale.copy(originalScale);
+                    _tempObj.updateMatrix();
+                    mesh.setMatrixAt(instanceId, _tempObj.matrix);
+                    mesh.instanceMatrix.needsUpdate = true;
+                }, 500);
             }
         });
 
