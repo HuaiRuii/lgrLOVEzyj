@@ -696,8 +696,9 @@
             photoCount: 40,
             treeHeight: 65,
             treeRadius: 28,
-            // 【核心修改】将心形大小从45调整为30，确保不超过屏幕
-            heartSize: 4
+            heartSize: 4,
+            // 树形与心形切换时的爆炸半径（比心和树都大）
+            explodeRadius: 60
         };
         const STATE = {
             mode: 'TREE',
@@ -711,7 +712,10 @@
             // 【优化】心形模式默认距离调整为120（更近，适合较小的心形）
             cameraRadius: 200,
             targetCameraRadius: 200,
-            heartProgress: 0 // 心形转换进度 (0-1)
+            heartProgress: 0, // 心形转换进度 (0-1)
+            isExploding: false,
+            explodeProgress: 0,
+            explodeTargetMode: 'TREE'
         };
         // ================= 1. Three.js 场景初始化 =================
         const container = document.getElementById('canvas-container');
@@ -969,6 +973,7 @@
         const _pullDir = new THREE.Vector3();
         const _lookTarget = new THREE.Vector3();
         const _tempScale = new THREE.Vector3();
+        const _explodeDir = new THREE.Vector3();
         // 【新增】心形几何体
         function createHeartShape(size = 1) {
             const curve = new THREE.Curve();
@@ -1226,6 +1231,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             const treeLights = new THREE.Points(lightGeometry, lightMaterial);
             scene.add(treeLights);
             return {
+                mesh: treeLights,
                 update(time) {
                     const positions = lightGeometry.attributes.position.array;
                     // 根据模式确定目标模式值和目标数量
@@ -1260,6 +1266,28 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     const currentMaxIndex = lightMaterial.uniforms.uMaxIndex.value;
                     const newMaxIndex = THREE.MathUtils.lerp(currentMaxIndex, targetMaxIndex, 0.03);
                     lightMaterial.uniforms.uMaxIndex.value = newMaxIndex;
+                    // 处理爆炸过渡：从爆炸起始位置向随机方向胡乱炸开
+                    if (STATE.isExploding && treeLightsSystem.explodeStartPositions && treeLightsSystem.explodeDirections) {
+                        const startPositions = treeLightsSystem.explodeStartPositions;
+                        const directions = treeLightsSystem.explodeDirections;
+                        const eased = 1 - Math.pow(1 - STATE.explodeProgress, 3);
+                        const explodeRadius = CONFIG.explodeRadius;
+                        for (let i = 0; i < maxLightCount; i++) {
+                            const i3 = i * 3;
+                            const sx = startPositions[i3];
+                            const sy = startPositions[i3 + 1];
+                            const sz = startPositions[i3 + 2];
+                            const dx = directions[i3];
+                            const dy = directions[i3 + 1];
+                            const dz = directions[i3 + 2];
+                            positions[i3] = sx + dx * explodeRadius * eased;
+                            positions[i3 + 1] = sy + dy * explodeRadius * eased;
+                            positions[i3 + 2] = sz + dz * explodeRadius * eased;
+                        }
+                        lightGeometry.attributes.position.needsUpdate = true;
+                        lightMaterial.uniforms.uTime.value = time;
+                        return;
+                    }
                     // 更新每个彩灯的位置（内联计算，避免clone()）
                     const cosR = Math.cos(time * 0.4);
                     const sinR = Math.sin(time * 0.4);
@@ -1314,6 +1342,18 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                             positions[i3 + 2] = fz;
                         }
                     }
+                    // 爆炸结束后，彩灯从爆炸位置平滑收拢到目标位置
+                    if (treeLightsSystem.transitionProgress < 1 && treeLightsSystem.transitionStartPositions) {
+                        treeLightsSystem.transitionProgress += 0.02;
+                        const t = treeLightsSystem.transitionProgress;
+                        const startPositions = treeLightsSystem.transitionStartPositions;
+                        for (let i = 0; i < maxLightCount; i++) {
+                            const i3 = i * 3;
+                            positions[i3] = startPositions[i3] * (1 - t) + positions[i3] * t;
+                            positions[i3 + 1] = startPositions[i3 + 1] * (1 - t) + positions[i3 + 1] * t;
+                            positions[i3 + 2] = startPositions[i3 + 2] * (1 - t) + positions[i3 + 2] * t;
+                        }
+                    }
                     lightGeometry.attributes.position.needsUpdate = true;
                     lightMaterial.uniforms.uTime.value = time;
                 }
@@ -1321,6 +1361,30 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
         }
         // 创建彩灯系统
         const treeLightsSystem = createTreeLights();
+
+        // 捕获爆炸起始位置与随机爆炸方向
+        function captureExplodeStartPositions() {
+            const positions = treeLightsSystem.mesh.geometry.attributes.position.array;
+            const maxLightCount = positions.length / 3;
+            treeLightsSystem.explodeStartPositions = new Float32Array(positions.length);
+            treeLightsSystem.explodeStartPositions.set(positions);
+            treeLightsSystem.explodeDirections = new Float32Array(positions.length);
+            for (let i = 0; i < maxLightCount; i++) {
+                const i3 = i * 3;
+                const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                treeLightsSystem.explodeDirections[i3] = dir.x;
+                treeLightsSystem.explodeDirections[i3 + 1] = dir.y;
+                treeLightsSystem.explodeDirections[i3 + 2] = dir.z;
+            }
+            particleData.forEach(p => {
+                p.explodeStartPos = p.currentPos.clone();
+                p.explodeDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+            });
+            objects.forEach(obj => {
+                obj.userData.explodeStartPos = obj.position.clone();
+                obj.userData.explodeDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+            });
+        }
         function createPhotoObject(index) {
             const geo = new THREE.PlaneGeometry(1, 1);
             const tex = createPhotoTexture(null, index);
@@ -1486,12 +1550,21 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 const pinchDist = Math.hypot(landmarks[8].x - landmarks[4].x, landmarks[8].y - landmarks[4].y);
                 STATE.pinchDistance = pinchDist;
                 const now = Date.now();
-                // 【修改】V字手势检测 - 心形模式下使用更近的摄像机距离
-                if (vGesture && STATE.mode !== 'HEART' && (now - STATE.lastModeTime > 1000)) {
-                    STATE.mode = 'HEART';
+                // 【修改】V字手势检测 - 树形->心形用爆炸过渡，其他模式->心形直接切换
+                if (vGesture && !STATE.isExploding && STATE.mode !== 'HEART' && (now - STATE.lastModeTime > 1000)) {
                     STATE.lastModeTime = now;
                     // 【优化】心形模式使用更近的摄像机距离
                     STATE.targetCameraRadius = 120;
+                    if (STATE.mode === 'TREE') {
+                        // 树 -> 心：爆炸过渡
+                        STATE.isExploding = true;
+                        STATE.explodeTargetMode = 'HEART';
+                        STATE.explodeProgress = 0;
+                        captureExplodeStartPositions();
+                    } else {
+                        // 手掌/散开 -> 心：直接切换
+                        STATE.mode = 'HEART';
+                    }
                 }
                 // 其他手势检测
                 else if (pinchDist < 0.05 && extendedCount >= 1 && STATE.mode !== 'INSPECT' && (now - STATE.lastModeTime > 1000)) {
@@ -1515,10 +1588,17 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     }
                 } else if (extendedCount >= 4 && STATE.mode !== 'SCATTER' && pinchDist > 0.1) {
                     STATE.mode = 'SCATTER';
-                } else if (extendedCount === 0 && STATE.mode !== 'TREE' && pinchDist > 0.1) {
-                    STATE.mode = 'TREE';
-                    // 退出心形模式时重置照片状态
-                    if (STATE.mode === 'TREE') {
+                } else if (extendedCount === 0 && !STATE.isExploding && STATE.mode !== 'TREE' && pinchDist > 0.1) {
+                    STATE.lastModeTime = now;
+                    if (STATE.mode === 'HEART') {
+                        // 心 -> 树：爆炸过渡
+                        STATE.isExploding = true;
+                        STATE.explodeTargetMode = 'TREE';
+                        STATE.explodeProgress = 0;
+                        captureExplodeStartPositions();
+                    } else {
+                        // 手掌/散开 -> 树：直接切换，并重置照片心形状态
+                        STATE.mode = 'TREE';
                         objects.forEach(obj => {
                             if (obj.userData.isPhoto && obj.userData.isHeartPhoto) {
                                 obj.userData.isHeartPhoto = false;
@@ -1909,9 +1989,32 @@ gl_FragColor = vec4(vColor, alpha);
         const _targetUp = new THREE.Vector3(0, 1, 0);
         function updatePhysics(time) {
             _camForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
-            // 控制实体树干和树叶的显示与旋转
+            // 处理树形与心形切换时的爆炸过渡
+            if (STATE.isExploding) {
+                STATE.explodeProgress += 0.03;
+                if (STATE.explodeProgress >= 1) {
+                    STATE.mode = STATE.explodeTargetMode;
+                    STATE.isExploding = false;
+                    STATE.explodeProgress = 0;
+                    // 彩灯从爆炸位置平滑收拢到目标位置
+                    const lightPositions = treeLightsSystem.mesh.geometry.attributes.position.array;
+                    treeLightsSystem.transitionStartPositions = new Float32Array(lightPositions.length);
+                    treeLightsSystem.transitionStartPositions.set(lightPositions);
+                    treeLightsSystem.transitionProgress = 0;
+                    // 切换回树形时重置照片心形状态
+                    if (STATE.mode === 'TREE') {
+                        objects.forEach(obj => {
+                            if (obj.userData.isPhoto && obj.userData.isHeartPhoto) {
+                                obj.userData.isHeartPhoto = false;
+                                obj.scale.copy(obj.userData.baseScale || new THREE.Vector3(1, 1, 1));
+                            }
+                        });
+                    }
+                }
+            }
+            // 控制实体树干和树叶的显示与旋转（爆炸期间隐藏实体树）
             if (treeGroup) {
-                const isTreeMode = STATE.mode === 'TREE';
+                const isTreeMode = STATE.mode === 'TREE' && !STATE.isExploding;
                 treeGroup.visible = isTreeMode;
                 if (isTreeMode) {
                     treeGroup.rotation.y = time * 0.4;
@@ -1919,7 +2022,7 @@ gl_FragColor = vec4(vColor, alpha);
             }
             // 更新粒子树枝
             if (branchSystem) {
-                const isTreeMode = STATE.mode === 'TREE';
+                const isTreeMode = STATE.mode === 'TREE' && !STATE.isExploding;
                 branchSystem.mesh.visible = isTreeMode;
                 if (isTreeMode) {
                     const treeRotation = time * 0.4;
@@ -1996,8 +2099,9 @@ gl_FragColor = vec4(vColor, alpha);
             pointLight.intensity = lerp(pointLight.intensity, targetIntensity_Point, 0.05);
             frontLight.intensity = lerp(frontLight.intensity, targetIntensity_Front, 0.05);
             ambientLight.intensity = lerp(ambientLight.intensity, targetIntensity_Ambient, 0.05);
-            // 【新增】心形转换进度
-            if (STATE.mode === 'HEART') {
+            // 【新增】心形转换进度（爆炸到心形时提前开始过渡）
+            const isHeartTarget = STATE.mode === 'HEART' || (STATE.isExploding && STATE.explodeTargetMode === 'HEART');
+            if (isHeartTarget) {
                 STATE.heartProgress = lerp(STATE.heartProgress, 1.0, 0.03);
             } else {
                 STATE.heartProgress = lerp(STATE.heartProgress, 0.0, 0.03);
@@ -2007,7 +2111,15 @@ gl_FragColor = vec4(vColor, alpha);
                 const isStar = obj.userData.isStar;
                 _targetPos.set(0, 0, 0);
                 let targetScaleMult = 1.0;
-                if (STATE.mode === 'HEART') {
+                if (STATE.isExploding) {
+                    const startPos = obj.userData.explodeStartPos || obj.position;
+                    const dir = obj.userData.explodeDir || _explodeDir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                    const eased = 1 - Math.pow(1 - STATE.explodeProgress, 3);
+                    _targetPos.copy(startPos).add(dir.clone().multiplyScalar(CONFIG.explodeRadius * eased));
+                    dummy.quaternion.copy(camera.quaternion);
+                    dummy.rotateY(Math.PI);
+                    obj.userData.targetQuaternion.copy(dummy.quaternion);
+                } else if (STATE.mode === 'HEART') {
                     if (obj.userData.isPhoto) {
                         const gridCols = 4;
                         const photoIndex = obj.userData.id;
@@ -2098,7 +2210,7 @@ gl_FragColor = vec4(vColor, alpha);
             });
 
             // === 更新粒子 InstancedMesh（2000粒子仅3个draw call） ===
-            const isHeartMode = STATE.mode === 'HEART';
+            const isHeartMode = STATE.mode === 'HEART' || (STATE.isExploding && STATE.explodeTargetMode === 'HEART');
             instancedGreen.material = isHeartMode ? matHeart : matGreen;
             instancedGold.material = isHeartMode ? matHeart : matGold;
             instancedRed.material = isHeartMode ? matHeart : matRed;
@@ -2106,7 +2218,12 @@ gl_FragColor = vec4(vColor, alpha);
                 const p = particleData[i];
                 _targetPos.set(0, 0, 0);
                 let targetScaleMult = 1.0;
-                if (isHeartMode) {
+                if (STATE.isExploding) {
+                    const startPos = p.explodeStartPos || p.currentPos;
+                    const dir = p.explodeDir || _explodeDir.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                    const eased = 1 - Math.pow(1 - STATE.explodeProgress, 3);
+                    _targetPos.copy(startPos).add(dir.clone().multiplyScalar(CONFIG.explodeRadius * eased));
+                } else if (isHeartMode) {
                     _targetPos.copy(p.heartPos);
                     _targetPos.y += Math.sin(time * 2.0 + p.phase) * 2.0;
                     _targetPos.x *= 0.8 + Math.sin(time * 1.5 + p.phase * 0.5) * 0.1;
@@ -2157,7 +2274,7 @@ gl_FragColor = vec4(vColor, alpha);
             // 【核心】应用平滑变焦
             STATE.cameraRadius = lerp(STATE.cameraRadius, STATE.targetCameraRadius, 0.05);
             const radius = STATE.cameraRadius;
-            if (STATE.mode === 'SCATTER' || STATE.mode === 'INSPECT' || STATE.mode === 'HEART') {
+            if (STATE.mode === 'SCATTER' || STATE.mode === 'INSPECT' || STATE.mode === 'HEART' || STATE.isExploding) {
                 let targetRotX = 0.001;
                 let targetRotY = 0;
                 if (STATE.handDetected) {
