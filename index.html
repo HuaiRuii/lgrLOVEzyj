@@ -631,12 +631,51 @@
             // 双手爱心：需要连续多少帧满足才触发（防抖）
             heartConfirmFrames: 10,
             // 其它手势防抖：连续多少帧满足才触发
-            gestureConfirmFrames: 2
+            gestureConfirmFrames: 2,
+            // 手势推理优化参数
+            gesture: {
+                // 各模式下每 N 帧推理一次（值=2 表示每 2 帧推理 1 次）
+                frameSkip: {
+                    SEED: _isMobile ? 4 : 2,
+                    GROWING: _isMobile ? 4 : 2,
+                    TREE: _isMobile ? 8 : 5,
+                    SCATTER: _isMobile ? 4 : 2,
+                    INSPECT: _isMobile ? 4 : 2,
+                    HEART: _isMobile ? 4 : 3,
+                    default: _isMobile ? 4 : 3
+                },
+                // 各模式下检测的最大手数（SEED 需要双手检测爱心，其余只需单手）
+                maxNumHands: {
+                    SEED: 2,
+                    GROWING: 1,
+                    TREE: 1,
+                    SCATTER: 1,
+                    INSPECT: 1,
+                    HEART: 1,
+                    default: 1
+                },
+                // 手部最小尺寸阈值（手腕到中指根的距离，归一化坐标）
+                // 低于此值的手视为太小/太远，不参与手势识别
+                minHandSize: 0.13
+            }
         };
         let gestureEnabled = true;
         let cameraUtils = null;
         let handFrameSkip = 0;
-        const HAND_FRAME_SKIP = _isMobile ? 3 : 0; // 移动端每3帧推理一次
+        let lastHandMaxNumHands = 2;
+        let handsInstance = null;
+
+        // 动态帧跳过：根据当前模式返回跳帧数
+        function getFrameSkip() {
+            const skips = CONFIG.gesture.frameSkip;
+            return skips[STATE.mode] ?? skips.default;
+        }
+
+        // 动态 maxNumHands：根据当前模式返回最大手数
+        function getMaxNumHands() {
+            const hands = CONFIG.gesture.maxNumHands;
+            return hands[STATE.mode] ?? hands.default;
+        }
 
         const STATE = {
             mode: 'SEED', // 【初始状态改为种子】
@@ -1373,26 +1412,28 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     const hand1 = results.multiHandLandmarks[0];
                     const hand2 = results.multiHandLandmarks[1];
 
+                    // 过滤太小的手（距离摄像头太远）
+                    const h1Size = Math.hypot(hand1[9].x - hand1[0].x, hand1[9].y - hand1[0].y);
+                    const h2Size = Math.hypot(hand2[9].x - hand2[0].x, hand2[9].y - hand2[0].y);
+                    const bothHandsBigEnough = h1Size >= CONFIG.gesture.minHandSize && h2Size >= CONFIG.gesture.minHandSize;
                     // 先确认两只手的手腕距离够远（排除单手误检为双手）
                     const wristDist = Math.hypot(hand1[0].x - hand2[0].x, hand1[0].y - hand2[0].y);
-                    if (wristDist < CONFIG.heartMinWristDist) {
+                    const wristsFarEnough = wristDist >= CONFIG.heartMinWristDist;
+                    // 双手拇指(4)和食指(8)指尖距离
+                    const thumbDist = Math.hypot(hand1[4].x - hand2[4].x, hand1[4].y - hand2[4].y);
+                    const indexDist = Math.hypot(hand1[8].x - hand2[8].x, hand1[8].y - hand2[8].y);
+                    const fingersClose = thumbDist < CONFIG.heartFingerThreshold && indexDist < CONFIG.heartFingerThreshold;
+
+                    if (!bothHandsBigEnough || !wristsFarEnough || !fingersClose) {
                         STATE.heartFrameCount = 0;
                     } else {
-                        // 双手拇指(4)和食指(8)指尖距离
-                        const thumbDist = Math.hypot(hand1[4].x - hand2[4].x, hand1[4].y - hand2[4].y);
-                        const indexDist = Math.hypot(hand1[8].x - hand2[8].x, hand1[8].y - hand2[8].y);
-
-                        if (thumbDist < CONFIG.heartFingerThreshold && indexDist < CONFIG.heartFingerThreshold) {
-                            STATE.heartFrameCount++;
-                            if (STATE.heartFrameCount >= CONFIG.heartConfirmFrames) {
-                                STATE.mode = 'GROWING';
-                                STATE.lastModeTime = Date.now();
-                                STATE.heartFrameCount = 0;
-                                const q = document.getElementById('love-quote');
-                                if (q) q.classList.add('visible');
-                            }
-                        } else {
+                        STATE.heartFrameCount++;
+                        if (STATE.heartFrameCount >= CONFIG.heartConfirmFrames) {
+                            STATE.mode = 'GROWING';
+                            STATE.lastModeTime = Date.now();
                             STATE.heartFrameCount = 0;
+                            const q = document.getElementById('love-quote');
+                            if (q) q.classList.add('visible');
                         }
                     }
                 } else {
@@ -1422,6 +1463,14 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 const wrist = landmarks[0];
                 const middleMCP = landmarks[9];
                 const handSize = Math.hypot(middleMCP.x - wrist.x, middleMCP.y - wrist.y);
+
+                // 手太小（距离太远）则不参与手势识别
+                if (handSize < CONFIG.gesture.minHandSize) {
+                    STATE.handDetected = false;
+                    debugCtx.restore();
+                    return;
+                }
+
                 const minHand = 0.05; const maxHand = 0.25;
                 const minRad = 140; const maxRad = 200;
                 let t = (handSize - minHand) / (maxHand - minHand);
@@ -1526,10 +1575,9 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                     return `models/${file}`;
                 }
             });
-            const isMobile = /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            // 移动端降低推理复杂度
-            const handsModelComplexity = isMobile ? 0 : 1;
-            hands.setOptions({ maxNumHands: 2, modelComplexity: handsModelComplexity, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, useCpuInference: isMobile });
+            handsInstance = hands;
+            const handsModelComplexity = _isMobile ? 0 : 1;
+            hands.setOptions({ maxNumHands: getMaxNumHands(), modelComplexity: handsModelComplexity, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, useCpuInference: _isMobile });
             hands.onResults(onResults);
 
             const originalFetch = window.fetch;
@@ -1578,7 +1626,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             };
 
             if (window.Camera) {
-                cameraUtils = new window.Camera(videoElement, { onFrame: async () => { if (!gestureEnabled) return; if (HAND_FRAME_SKIP > 0 && ++handFrameSkip % (HAND_FRAME_SKIP + 1) !== 0) return; await hands.send({ image: videoElement }); }, width: 320, height: 240 });
+                cameraUtils = new window.Camera(videoElement, { onFrame: async () => { if (!gestureEnabled) return; const skip = getFrameSkip(); if (skip > 1 && ++handFrameSkip % skip !== 0) return; const targetHands = getMaxNumHands(); if (handsInstance && targetHands !== lastHandMaxNumHands) { lastHandMaxNumHands = targetHands; handsInstance.setOptions({ maxNumHands: targetHands }); } await handsInstance.send({ image: videoElement }); }, width: 320, height: 240 });
                 cameraUtils.start();
             }
         } else { document.getElementById('loader').innerText = "错误: 无法加载 AI 模型"; }
