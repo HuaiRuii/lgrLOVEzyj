@@ -1364,6 +1364,8 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                                 STATE.mode = 'GROWING';
                                 STATE.lastModeTime = Date.now();
                                 STATE.heartFrameCount = 0;
+                                const q = document.getElementById('love-quote');
+                                if (q) q.classList.add('visible');
                             }
                         } else {
                             STATE.heartFrameCount = 0;
@@ -1721,7 +1723,7 @@ varying vec3 vColor; varying float vBrightness; void main() { vec2 center = gl_P
                     STATE.growProgress = 1;
                     STATE.mode = 'TREE';
                     const quote = document.getElementById('love-quote');
-                    if (quote) quote.classList.add('visible');
+                    if (quote) setTimeout(() => quote.classList.remove('visible'), 5000);
                 }
             }
 
