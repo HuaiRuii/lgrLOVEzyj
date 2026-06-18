@@ -1290,9 +1290,9 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             const mesh = new THREE.Mesh(geo, mat);
             const baseScale = new THREE.Vector3(6, 6.5, 1);
             mesh.scale.copy(baseScale);
-            const seed = index * 13;
+            const seed = index * 34;
             const rand = (Math.sin(seed) + 1) / 2;
-            const hNorm = 0.15 + rand * 0.75;
+            const hNorm = 0.15 + rand * 0.65;
             const angle = (Math.sin(seed * 789) + 1) * Math.PI + index * 0.5;
             const treePos = getTreeSurfacePosition(hNorm, angle, 1.2);
             const scatterRadius = 70 + Math.random() * 30;
@@ -1389,6 +1389,70 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 reader.readAsDataURL(file);
             });
         });
+
+        // ================= 自动加载 image/ 目录照片 =================
+        {
+            const IMAGE_DIR = 'image/';
+            const MAX_SCAN = 40;
+            const extensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+            // 探测期间静默拦截 Image 加载失败的控制台报错
+            const suppressImgErrors = (e) => {
+                if (e.target && e.target.tagName === 'IMG') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            };
+            window.addEventListener('error', suppressImgErrors, true);
+
+            function probeImage(url) {
+                return new Promise(resolve => {
+                    const img = new Image();
+                    img.onload = () => resolve(true);
+                    img.onerror = () => resolve(false);
+                    img.src = url;
+                });
+            }
+
+            (async () => {
+                const foundUrls = [];
+                for (let i = 1; i <= MAX_SCAN; i++) {
+                    for (const ext of extensions) {
+                        if (await probeImage(`${IMAGE_DIR}${i}.${ext}`)) {
+                            foundUrls.push(`${IMAGE_DIR}${i}.${ext}`);
+                            break;
+                        }
+                    }
+                }
+                // 探测完成，恢复全局错误输出
+                window.removeEventListener('error', suppressImgErrors, true);
+
+                if (foundUrls.length === 0) return;
+
+                const photoObjects = objects.filter(o => o.userData.isPhoto);
+                foundUrls.forEach((url, idx) => {
+                    if (idx >= photoObjects.length) return;
+                    const mesh = photoObjects[idx];
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        const tex = createPhotoTexture(img, idx, true);
+                        if (mesh.userData.originalMat) mesh.userData.originalMat.map = tex;
+                        mesh.material.map = tex;
+                        mesh.material.needsUpdate = true;
+                        const aspect = tex.image.width / tex.image.height;
+                        if (mesh.userData.baseScale) {
+                            mesh.userData.baseScale.set(5.5 * aspect, 5.5, 1);
+                        }
+                    };
+                    img.src = url;
+                });
+                // 有真实图片时，隐藏无图的占位照片挂饰
+                photoObjects.forEach((mesh, i) => {
+                    if (i >= foundUrls.length) mesh.visible = false;
+                });
+            })();
+        }
 
         // ================= 4. MediaPipe 手势识别 =================
         const videoElement = document.getElementById('input_video');
