@@ -141,6 +141,21 @@
             pointer-events: none;
         }
 
+        #device-info {
+            position: absolute;
+            top: 33px;
+            right: 5px;
+            color: rgba(0, 255, 255, 0.8);
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.4);
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px 8px;
+            border-radius: 3px;
+            backdrop-filter: blur(3px);
+            pointer-events: none;
+        }
+
         #blessing-overlay {
             position: absolute;
             top: 20%;
@@ -468,6 +483,7 @@
             <p>👋 <b>移动</b>: 旋转球体视角</p>
         </div>
         <div id="fps-counter">FPS: 0</div>
+        <div id="device-info"></div>
         <div id="blessing-overlay">
             <div id="blessing-content"></div>
         </div>
@@ -619,10 +635,13 @@
         };
         let gestureEnabled = true;
         let cameraUtils = null;
+        let handFrameSkip = 0;
+        const HAND_FRAME_SKIP = _isMobile ? 3 : 0; // 移动端每3帧推理一次
 
         const STATE = {
             mode: 'SEED', // 【初始状态改为种子】
             growProgress: 0, // 生长进度 0 到 1
+            gestureUnlockTime: 0, // 手势解锁时间戳（生长动画完成后1秒）
             handDetected: false,
             handPosition: { x: 0, y: 0 },
             pinchDistance: 1,
@@ -656,18 +675,22 @@
         renderer.toneMappingExposure = 1.9;
         container.appendChild(renderer.domElement);
         const renderScene = new RenderPass(scene, camera);
-        const bloomDiv = _isMobile ? 3 : 2;
-        const bloomResolution = new THREE.Vector2(
-            Math.floor(window.innerWidth / bloomDiv),
-            Math.floor(window.innerHeight / bloomDiv)
-        );
-        const bloomPass = new UnrealBloomPass(bloomResolution, 1.5, 0.4, 0.85);
-        bloomPass.threshold = 0.3;
-        bloomPass.strength = _isMobile ? 0.8 : 1.2;
-        bloomPass.radius = 0.5;
         const composer = new EffectComposer(renderer);
         composer.addPass(renderScene);
-        composer.addPass(bloomPass);
+        
+        let bloomPass = null;
+        if (!_isMobile) {
+            const bloomDiv = 2;
+            const bloomResolution = new THREE.Vector2(
+                Math.floor(window.innerWidth / bloomDiv),
+                Math.floor(window.innerHeight / bloomDiv)
+            );
+            bloomPass = new UnrealBloomPass(bloomResolution, 1.5, 0.4, 0.85);
+            bloomPass.threshold = 0.3;
+            bloomPass.strength = 1.2;
+            bloomPass.radius = 0.5;
+            composer.addPass(bloomPass);
+        }
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 2.5);
         scene.add(ambientLight);
@@ -772,8 +795,8 @@
         createTrunk();
 
         function createBranchParticles() {
-            const particleCount = 5000;
-            const branchGeo = new THREE.ConeGeometry(0.22, 1.0, 4);
+            const particleCount = _isMobile ? 1000 : 2000;
+            const branchGeo = new THREE.ConeGeometry(0.22, 1.0, _isMobile ? 3 : 4);
             const branchMat = new THREE.MeshStandardMaterial({
                 color: 0x267a3c, roughness: 0.85, metalness: 0.05, emissive: 0x0f4a22, emissiveIntensity: 0.15
             });
@@ -1344,7 +1367,8 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             debugCtx.drawImage(results.image, 0, 0, debugCanvas.width, debugCanvas.height);
             
             // 【新增】双手爱心检测与生长屏蔽逻辑
-            if (STATE.mode === 'SEED' || STATE.mode === 'GROWING') {
+            // 生长动画期间 + 生长完成后1秒内屏蔽其他手势
+            if (STATE.mode === 'SEED' || STATE.mode === 'GROWING' || (STATE.mode === 'TREE' && Date.now() < STATE.gestureUnlockTime)) {
                 if (STATE.mode === 'SEED' && results.multiHandLandmarks && results.multiHandLandmarks.length >= 2) {
                     const hand1 = results.multiHandLandmarks[0];
                     const hand2 = results.multiHandLandmarks[1];
@@ -1503,8 +1527,9 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 }
             });
             const isMobile = /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            // 修改为最多追踪两只手
-            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, useCpuInference: isMobile });
+            // 移动端降低推理复杂度
+            const handsModelComplexity = isMobile ? 0 : 1;
+            hands.setOptions({ maxNumHands: 2, modelComplexity: handsModelComplexity, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, useCpuInference: isMobile });
             hands.onResults(onResults);
 
             const originalFetch = window.fetch;
@@ -1553,7 +1578,7 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
             };
 
             if (window.Camera) {
-                cameraUtils = new window.Camera(videoElement, { onFrame: async () => { if (!gestureEnabled) return; await hands.send({ image: videoElement }); }, width: 320, height: 240 });
+                cameraUtils = new window.Camera(videoElement, { onFrame: async () => { if (!gestureEnabled) return; if (HAND_FRAME_SKIP > 0 && ++handFrameSkip % (HAND_FRAME_SKIP + 1) !== 0) return; await hands.send({ image: videoElement }); }, width: 320, height: 240 });
                 cameraUtils.start();
             }
         } else { document.getElementById('loader').innerText = "错误: 无法加载 AI 模型"; }
@@ -1722,6 +1747,7 @@ varying vec3 vColor; varying float vBrightness; void main() { vec2 center = gl_P
                 if (STATE.growProgress >= 1) {
                     STATE.growProgress = 1;
                     STATE.mode = 'TREE';
+                    STATE.gestureUnlockTime = Date.now() + 1000; // 生长完成后1秒再解锁手势
                     const quote = document.getElementById('love-quote');
                     if (quote) setTimeout(() => quote.classList.remove('visible'), 5000);
                 }
@@ -1996,25 +2022,33 @@ varying vec3 vColor; varying float vBrightness; void main() { vec2 center = gl_P
         }
 
         const clock = new THREE.Clock();
-        const targetFPS = 120;
-        const frameInterval = 1000 / targetFPS;
         let lastFrameTime = 0; let frameCount = 0; let lastFPSUpdateTime = 0; let fps = 0;
         const fpsCounter = document.getElementById('fps-counter');
+        const deviceInfoEl = document.getElementById('device-info');
+        const _ua = navigator.userAgent;
+        let deviceLabel = 'Desktop';
+        const isTouchDevice = navigator.maxTouchPoints > 1;
+        if (/iPad/.test(_ua) || (isTouchDevice && /Macintosh/.test(_ua))) deviceLabel = 'iPad';
+        else if (/iPhone/.test(_ua)) deviceLabel = 'iPhone';
+        else if (/Android/.test(_ua)) deviceLabel = _ua.match(/;\s*([^;)]+)/)?.[1]?.trim() || 'Android';
+        else if (/Macintosh/.test(_ua)) deviceLabel = 'Mac';
+        else if (/Windows/.test(_ua)) deviceLabel = 'Windows';
+        else if (/Linux/.test(_ua)) deviceLabel = 'Linux';
+        deviceInfoEl.textContent = deviceLabel;
 
         function animate(currentTime) {
             requestAnimationFrame(animate);
             const deltaTime = currentTime - lastFrameTime;
-            if (deltaTime >= frameInterval) {
-                lastFrameTime = currentTime - (deltaTime % frameInterval);
-                frameCount++;
-                const time = clock.getElapsedTime();
-                updatePhysics(time);
-                starSystem.update(time);
-                treeLightsSystem.update(time); 
-                composer.render();
-                if (currentTime - lastFPSUpdateTime >= 500) {
-                    fps = Math.round(1000 / deltaTime); lastFPSUpdateTime = currentTime; fpsCounter.textContent = `FPS: ${fps}`;
-                }
+            if (deltaTime < 16) return; // ~60fps 上限,等待下一帧
+            lastFrameTime = currentTime;
+            frameCount++;
+            const time = clock.getElapsedTime();
+            updatePhysics(time);
+            starSystem.update(time);
+            treeLightsSystem.update(time);
+            composer.render();
+            if (currentTime - lastFPSUpdateTime >= 500) {
+                fps = Math.round(1000 / deltaTime); lastFPSUpdateTime = currentTime; fpsCounter.textContent = `FPS: ${fps}`;
             }
         }
         animate(0);
@@ -2052,7 +2086,7 @@ varying vec3 vColor; varying float vBrightness; void main() { vec2 center = gl_P
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
-            bloomPass.resolution.set(Math.floor(window.innerWidth / bloomDiv), Math.floor(window.innerHeight / bloomDiv));
+            if (bloomPass) bloomPass.resolution.set(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2));
         });
     </script>
 </body>
