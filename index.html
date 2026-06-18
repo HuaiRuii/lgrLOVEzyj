@@ -607,7 +607,15 @@
             treeRadius: 28,
             heartSize: 4,
             explodeRadius: 60,
-            heartPhotoGather: 1.1
+            heartPhotoGather: 1.1,
+            // 双手爱心：手腕最小距离（确认是两只独立的手）
+            heartMinWristDist: 0.15,
+            // 双手爱心：指尖接近阈值（越小越严格）
+            heartFingerThreshold: 0.05,
+            // 双手爱心：需要连续多少帧满足才触发（防抖）
+            heartConfirmFrames: 10,
+            // 其它手势防抖：连续多少帧满足才触发
+            gestureConfirmFrames: 2
         };
         let gestureEnabled = true;
         let cameraUtils = null;
@@ -627,7 +635,10 @@
             heartProgress: 0, 
             isExploding: false,
             explodeProgress: 0,
-            explodeTargetMode: 'TREE'
+            explodeTargetMode: 'TREE',
+            heartFrameCount: 0,
+            gestureFrameCount: 0,
+            lastGestureType: null
         };
 
         // ================= 1. Three.js 场景初始化 =================
@@ -1337,14 +1348,29 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 if (STATE.mode === 'SEED' && results.multiHandLandmarks && results.multiHandLandmarks.length >= 2) {
                     const hand1 = results.multiHandLandmarks[0];
                     const hand2 = results.multiHandLandmarks[1];
-                    // 检测双手拇指(4)和食指(8)的距离，模拟心形手势
-                    const thumbDist = Math.hypot(hand1[4].x - hand2[4].x, hand1[4].y - hand2[4].y);
-                    const indexDist = Math.hypot(hand1[8].x - hand2[8].x, hand1[8].y - hand2[8].y);
 
-                    if (thumbDist < 0.15 && indexDist < 0.15) {
-                        STATE.mode = 'GROWING';
-                        STATE.lastModeTime = Date.now();
+                    // 先确认两只手的手腕距离够远（排除单手误检为双手）
+                    const wristDist = Math.hypot(hand1[0].x - hand2[0].x, hand1[0].y - hand2[0].y);
+                    if (wristDist < CONFIG.heartMinWristDist) {
+                        STATE.heartFrameCount = 0;
+                    } else {
+                        // 双手拇指(4)和食指(8)指尖距离
+                        const thumbDist = Math.hypot(hand1[4].x - hand2[4].x, hand1[4].y - hand2[4].y);
+                        const indexDist = Math.hypot(hand1[8].x - hand2[8].x, hand1[8].y - hand2[8].y);
+
+                        if (thumbDist < CONFIG.heartFingerThreshold && indexDist < CONFIG.heartFingerThreshold) {
+                            STATE.heartFrameCount++;
+                            if (STATE.heartFrameCount >= CONFIG.heartConfirmFrames) {
+                                STATE.mode = 'GROWING';
+                                STATE.lastModeTime = Date.now();
+                                STATE.heartFrameCount = 0;
+                            }
+                        } else {
+                            STATE.heartFrameCount = 0;
+                        }
                     }
+                } else {
+                    STATE.heartFrameCount = 0;
                 }
                 if (results.multiHandLandmarks) {
                     for (const landmarks of results.multiHandLandmarks) {
@@ -1392,50 +1418,72 @@ gl_FragColor = vec4(vColor * (0.5 + vBrightness), alpha);
                 const pinchDist = Math.hypot(landmarks[8].x - landmarks[4].x, landmarks[8].y - landmarks[4].y);
                 STATE.pinchDistance = pinchDist;
                 const now = Date.now();
-                
-                if (vGesture && !STATE.isExploding && STATE.mode !== 'HEART' && (now - STATE.lastModeTime > 1000)) {
-                    STATE.lastModeTime = now;
-                    STATE.targetCameraRadius = 120;
-                    if (STATE.mode === 'TREE') {
-                        STATE.isExploding = true;
-                        STATE.explodeTargetMode = 'HEART';
-                        STATE.explodeProgress = 0;
-                        captureExplodeStartPositions();
-                    } else {
-                        STATE.mode = 'HEART';
-                    }
-                }
-                else if (pinchDist < 0.05 && extendedCount >= 1 && STATE.mode !== 'INSPECT' && (now - STATE.lastModeTime > 1000)) {
-                    STATE.mode = 'INSPECT';
-                    STATE.lastModeTime = now;
-                    const photoObjs = objects.filter(o => o.userData.isPhoto);
-                    let closestPhoto = null;
-                    let minDist = Infinity;
-                    photoObjs.forEach(obj => {
-                        if (obj.position.dot(camera.position) > 0) {
-                            _ndcPos.copy(obj.position).project(camera);
-                            const dist = Math.hypot(_ndcPos.x, _ndcPos.y);
-                            if (dist < minDist) { minDist = dist; closestPhoto = obj; }
-                        }
-                    });
-                    if (closestPhoto) { STATE.activePhotoIndex = closestPhoto.userData.id; }
+
+                // 识别当前手势类型
+                let gestureType = null;
+                if (vGesture && !STATE.isExploding && STATE.mode !== 'HEART') {
+                    gestureType = 'V';
+                } else if (pinchDist < 0.05 && extendedCount >= 1 && STATE.mode !== 'INSPECT') {
+                    gestureType = 'PINCH';
                 } else if (extendedCount >= 4 && STATE.mode !== 'SCATTER' && pinchDist > 0.1) {
-                    STATE.mode = 'SCATTER';
+                    gestureType = 'OPEN';
                 } else if (extendedCount === 0 && !STATE.isExploding && STATE.mode !== 'TREE' && pinchDist > 0.1) {
-                    STATE.lastModeTime = now;
-                    if (STATE.mode === 'HEART') {
-                        STATE.isExploding = true;
-                        STATE.explodeTargetMode = 'TREE';
-                        STATE.explodeProgress = 0;
-                        captureExplodeStartPositions();
-                    } else {
-                        STATE.mode = 'TREE';
-                        objects.forEach(obj => {
-                            if (obj.userData.isPhoto && obj.userData.isHeartPhoto) {
-                                obj.userData.isHeartPhoto = false;
-                                obj.scale.copy(obj.userData.baseScale || new THREE.Vector3(1, 1, 1));
+                    gestureType = 'FIST';
+                }
+
+                // 防抖：连续帧计数
+                if (gestureType === STATE.lastGestureType && gestureType !== null) {
+                    STATE.gestureFrameCount++;
+                } else {
+                    STATE.gestureFrameCount = gestureType !== null ? 1 : 0;
+                    STATE.lastGestureType = gestureType;
+                }
+
+                if (STATE.gestureFrameCount >= CONFIG.gestureConfirmFrames) {
+                    STATE.gestureFrameCount = 0;
+                    if (gestureType === 'V') {
+                        STATE.lastModeTime = now;
+                        STATE.targetCameraRadius = 120;
+                        if (STATE.mode === 'TREE') {
+                            STATE.isExploding = true;
+                            STATE.explodeTargetMode = 'HEART';
+                            STATE.explodeProgress = 0;
+                            captureExplodeStartPositions();
+                        } else {
+                            STATE.mode = 'HEART';
+                        }
+                    } else if (gestureType === 'PINCH') {
+                        STATE.mode = 'INSPECT';
+                        STATE.lastModeTime = now;
+                        const photoObjs = objects.filter(o => o.userData.isPhoto);
+                        let closestPhoto = null;
+                        let minDist = Infinity;
+                        photoObjs.forEach(obj => {
+                            if (obj.position.dot(camera.position) > 0) {
+                                _ndcPos.copy(obj.position).project(camera);
+                                const dist = Math.hypot(_ndcPos.x, _ndcPos.y);
+                                if (dist < minDist) { minDist = dist; closestPhoto = obj; }
                             }
                         });
+                        if (closestPhoto) { STATE.activePhotoIndex = closestPhoto.userData.id; }
+                    } else if (gestureType === 'OPEN') {
+                        STATE.mode = 'SCATTER';
+                    } else if (gestureType === 'FIST') {
+                        STATE.lastModeTime = now;
+                        if (STATE.mode === 'HEART') {
+                            STATE.isExploding = true;
+                            STATE.explodeTargetMode = 'TREE';
+                            STATE.explodeProgress = 0;
+                            captureExplodeStartPositions();
+                        } else {
+                            STATE.mode = 'TREE';
+                            objects.forEach(obj => {
+                                if (obj.userData.isPhoto && obj.userData.isHeartPhoto) {
+                                    obj.userData.isHeartPhoto = false;
+                                    obj.scale.copy(obj.userData.baseScale || new THREE.Vector3(1, 1, 1));
+                                }
+                            });
+                        }
                     }
                 }
             } else {
